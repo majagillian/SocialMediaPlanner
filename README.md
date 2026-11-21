@@ -68,7 +68,14 @@ Dazu kommen 12 Beitragsvorlagen, eigene Vorlagen und KI-Texte.
 ## Vorlage „App-Konzept (Vibe Coding)“
 Für die Planung von Apps, Handyspielen und Web-Apps, die du mit KI baust (z. B. für YouTube-Videos). Du findest sie unter „Board-Vorlage“ oder beim Anlegen eines neuen Boards („+ Board“ → Vorlage).
 
-**19 Frames:** App-Idee · App-Typ · Zielgruppe · Endgerät & Plattform · Allgemeine Funktionen · **Spezifische technische Funktionen** · Spiel: Mechanik · **Spiel: Figuren, Welt & Story** · **Design: Stil, Farben & Schrift** · UX & UI · Daten & Backend · Vibe-Coding-Tool & Technik · Monetarisierung · Veröffentlichung · Umfang & Video · MVP-Plan · Video-Ablauf · **KI-Anweisungen** · KI-Prompt
+**Aufbau in 10 Phasen von links nach rechts:** Jede Phase ist eine farbige Spalte mit großem Kopf (Nummer, Emoji, Titel und ein Satz Erklärung, ideal auch für Zuschauer im Video). Pfeile zwischen den Köpfen zeigen den Weg.
+1. 💡 Idee & Zielgruppe · 2. 🧩 Funktionen & Umfang · 3. 🎮 Spiel (optional) · 4. 🎨 Design & UX · 5. ⚙️ Technik & Business · 6. 🤖 Prompt an die KI · 7. 🔁 Weiterentwickeln · 8. 🧪 User Testing · 9. 🚀 Go-Live · 10. 🎬 Video
+
+- Frames sind pro Phase nummeriert (1.1, 1.2 …) und in der Farbe ihrer Phase gehalten.
+- Oben stehen eine Kurzanleitung und der Entwicklungsverlauf.
+- Das **Inhaltsverzeichnis** gruppiert die Frames nach Phasen. Ein Klick auf eine Phase zoomt auf ihren Anfang.
+- Doppelklick auf einen Phasenkopf ändert Titel, Emoji, Erklärung und Farbe.
+- Neue Weiterentwicklungs-Runden erscheinen untereinander in Phase 7. Die Spalte wächst automatisch mit.
 
 - **Auswahllisten:** Optionen anklicken. Fast jede Liste hat **„Sonstiges“** mit Freitext. Ein Doppelklick bearbeitet Überschrift, Optionen und die Bezeichnung im Prompt. Eigene Listen legst du mit der Taste K an.
 - **Spezifische technische Funktionen:** eigene Liste mit beliebig vielen Funktionen (auch mehrere auf einmal, eine pro Zeile). Jede Funktion bekommt eine **Priorität Hoch, Mittel oder Niedrig**, die du per Klick umschaltest. Die Liste lässt sich nach Priorität sortieren.

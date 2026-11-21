@@ -836,3 +836,21 @@ a.btn { text-decoration: none; }
 .dl-st.plan { background: var(--line); color: var(--ink-2); } .dl-st.run { background: var(--orange-l); color: var(--orange-d); } .dl-st.done { background: var(--mint-l); color: #047857; }
 .dl-counts { display: flex; gap: 14px; } .dl-counts em { color: var(--muted); font-style: normal; }
 .dl-go { color: var(--violet); font-weight: 600; font-size: 12px; }
+
+/* ======================= Phasen (Swimlanes) ======================= */
+.wb-lane { border-radius: 36px; border: 2px dashed color-mix(in srgb, var(--lc) 35%, transparent); pointer-events: none; z-index: 0; }
+.wb-lane .lock-badge { display: none; }
+.wb-lane.selected { outline: 3px solid var(--lc); outline-offset: 4px; border-radius: 36px; }
+.lane-head { pointer-events: auto; cursor: pointer; display: flex; gap: 20px; align-items: center; margin: 22px 22px 0; padding: 22px 26px; border-radius: 26px; background: var(--lc); color: #fff; box-shadow: 0 10px 30px color-mix(in srgb, var(--lc) 35%, transparent); }
+.lane-ic { font-size: 54px; line-height: 1; flex: none; width: 84px; height: 84px; display: grid; place-items: center; background: rgba(255,255,255,.18); border-radius: 22px; }
+.lane-head > div { display: flex; flex-direction: column; min-width: 0; }
+.lane-no { font-size: 15px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; opacity: .8; }
+.lane-head b { font-size: 34px; line-height: 1.15; }
+.lane-head p { margin: 6px 0 0; font-size: 17px; line-height: 1.35; opacity: .95; }
+.lane-arrow { position: absolute; right: -112px; top: 64px; width: 74px; height: 74px; border-radius: 50%; display: grid; place-items: center; background: #fff; color: var(--lc); font-size: 40px; font-weight: 900; box-shadow: 0 4px 16px rgba(31,27,46,.12); border: 3px solid var(--lc); }
+.wb-lane:has(.lane-steps) .lane-head { background: #fff; color: var(--ink); box-shadow: none; padding: 18px 22px 6px; }
+.wb-lane:has(.lane-steps) .lane-ic { background: var(--violet-xl); }
+.lane-steps { margin: 6px 40px 0 64px; padding: 0; font-size: 19px; line-height: 1.5; color: var(--ink-2); pointer-events: auto; }
+.lane-steps li { margin: 6px 0; padding-left: 6px; } .lane-steps li::marker { color: var(--lc); font-weight: 800; }
+.toc-lane { cursor: pointer; color: var(--lc); border-top: 1px solid var(--line); margin-top: 6px; }
+.toc-lane:hover { text-decoration: underline; }

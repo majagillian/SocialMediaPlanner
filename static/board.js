@@ -490,6 +490,17 @@ window.Board = (() => {
     lines.push('', sum.outro ?? T2.outro);
     return lines.join('\n');
   }
+  async function editLane(it) {
+    const v = await openForm({ title: it.guide ? 'Hinweisbox bearbeiten' : 'Phase bearbeiten', values: { ic: it.ic || '', t: it.t || '', sub: it.sub || '', steps: (it.steps || []).join('\n'), c: it.c || '#7C3AED' }, fields: [
+      { key: 'ic', label: 'Emoji', half: true }, { key: 'c', label: 'Farbe (Hex)', half: true },
+      { key: 't', label: 'Titel', required: true },
+      it.guide ? { key: 'steps', label: 'Schritte (einer pro Zeile)', type: 'textarea', rows: 5 } : { key: 'sub', label: 'Erklärung (für dich und deine Zuschauer)', type: 'textarea' },
+    ] });
+    if (!v) return; pushUndo();
+    Object.assign(it, { ic: v.ic, t: v.t, c: /^#[0-9a-f]{6}$/i.test(v.c) ? v.c : it.c });
+    if (it.guide) it.steps = v.steps.split('\n').map(x => x.trim()).filter(Boolean); else it.sub = v.sub;
+    updateVisual(it); refreshToc(); scheduleSave();
+  }
   /** Auswahllisten wachsen automatisch, falls Optionen nicht hineinpassen (Frame wächst mit) */
   function autoFitChoices(ids) {
     let changed = false;
@@ -500,8 +511,15 @@ window.Board = (() => {
         const grow = need - it.h; const frame = data.items.find(f => f.type === 'frame' && inside(it, f));
         it.h = need; place(n, it); changed = true;
         if (frame) { // alles darunter im selben Frame nach unten schieben und Frame vergrößern
+          const lane = data.items.find(l => l.type === 'lane' && !l.guide && inside(frame, l));
+          const oldBottom = frame.y + frame.h;
           data.items.filter(o => o !== it && o.type !== 'frame' && inside(o, frame) && o.y >= it.y + it.h - grow - 1).forEach(o => { o.y += grow; const on = nodeOf(o.id); if (on) place(on, o); });
           frame.h += grow; const fn = nodeOf(frame.id); if (fn) place(fn, frame);
+          if (lane) { // Frames darunter in derselben Phase mitschieben, Phase verlängern
+            data.items.filter(o => o !== frame && o.type !== 'lane' && o.y >= oldBottom - 1 && o.x >= lane.x && o.x + o.w <= lane.x + lane.w && o.y <= lane.y + lane.h).forEach(o => { o.y += grow; const on = nodeOf(o.id); if (on) place(on, o); });
+            const bottom = Math.max(...data.items.filter(o => o.type === 'frame' && inside(o, { ...lane, h: 1e7 })).map(o => o.y + o.h));
+            if (bottom + 40 > lane.y + lane.h) { lane.h = bottom + 40 - lane.y; const ln = nodeOf(lane.id); if (ln) place(ln, lane); }
+          }
         }
       }
     });
@@ -615,7 +633,7 @@ window.Board = (() => {
   function render() {
     $$('.wb-item', world).forEach(n => n.remove());
     // Frames immer zuunterst
-    [...data.items.filter(i => i.type === 'frame'), ...data.items.filter(i => i.type !== 'frame')]
+    [...data.items.filter(i => i.type === 'lane'), ...data.items.filter(i => i.type === 'frame'), ...data.items.filter(i => i.type !== 'frame' && i.type !== 'lane')]
       .forEach(it => world.appendChild(itemEl(it)));
     drawLinks(); applyView(); renderProps(); drawHandles(); updateCtxBar();
     autoFitChoices(); refreshToc();
@@ -685,6 +703,14 @@ window.Board = (() => {
         d.innerHTML = `<div class="ch-head"><span>${esc(it.title || 'Farbpalette')}</span><em>${it.name ? esc(it.name) + ' · ' : ''}Farbe anklicken zum Ändern</em></div>
           <div class="pal-row">${cols.map((c, i) => `<div class="pal-sw" data-act="pal-edit:${i}" title="${esc(c.role)} ändern"><i style="background:${c.hex}"></i><b>${esc(c.role)}</b><code>${esc(c.hex.toUpperCase())}</code></div>`).join('')}</div>
           <div class="fx-actions"><button class="fx-add" data-act="pal-choose">${ic('palette', '#7C3AED', 'ic xs')} Farbpalette wählen</button></div>`;
+        break;
+      }
+      case 'lane': {
+        d.style.setProperty('--lc', it.c || '#7C3AED');
+        d.style.background = hexA(it.c || '#7C3AED', it.guide ? 0.07 : 0.05);
+        d.innerHTML = it.guide
+          ? `<div class="lane-head"><span class="lane-ic">${esc(it.ic || '👋')}</span><div><b>${esc(it.t || '')}</b></div></div><ol class="lane-steps">${(it.steps || []).map(x => `<li>${esc(x)}</li>`).join('')}</ol>`
+          : `<div class="lane-head"><span class="lane-ic">${esc(it.ic || '')}</span><div><span class="lane-no">Phase ${it.no || ''}</span><b>${esc(it.t || '')}</b><p>${esc(it.sub || '')}</p></div></div>${it.last ? '' : '<span class="lane-arrow">→</span>'}`;
         break;
       }
       case 'devlog': {
@@ -1194,7 +1220,8 @@ window.Board = (() => {
     if (it.type === 'icon') return openIconPicker(it);
     if (it.type === 'choice') return editChoice(it);
     if (it.type === 'summary') return editSummary(it);
-    if (['features', 'palette', 'imgslot'].includes(it.type)) return; // werden per Einzelklick bedient
+    if (['features', 'palette', 'imgslot', 'devlog'].includes(it.type)) return; // werden per Einzelklick bedient
+    if (it.type === 'lane') return editLane(it);
     if (it.type === 'image') { replaceImageTarget = it; return $('.wb-file', root).click(); }
     if (TEXTUAL.includes(it.type)) editText(it.id);
   }
@@ -1303,7 +1330,7 @@ window.Board = (() => {
         <div class="p-row"><button class="pbtn danger" data-p="delete">Löschen</button></div>`;
     } else {
       const type = it.type;
-      const names = { devlog: 'Entwicklungsverlauf', features: 'Funktionsliste', palette: 'Farbpalette', imgslot: 'Bild-Platzhalter', choice: 'Auswahlliste', summary: 'KI-Prompt (automatisch)', draw: 'Zeichnung', note: 'Haftnotiz', text: 'Text', rect: 'Rechteck', ellipse: 'Kreis', diamond: 'Raute', shape: SHAPE_DEFS[it.shape]?.[0] || 'Form', icon: 'Icon', image: 'Bild', frame: 'Frame / Folie',
+      const names = { lane: 'Phase', devlog: 'Entwicklungsverlauf', features: 'Funktionsliste', palette: 'Farbpalette', imgslot: 'Bild-Platzhalter', choice: 'Auswahlliste', summary: 'KI-Prompt (automatisch)', draw: 'Zeichnung', note: 'Haftnotiz', text: 'Text', rect: 'Rechteck', ellipse: 'Kreis', diamond: 'Raute', shape: SHAPE_DEFS[it.shape]?.[0] || 'Form', icon: 'Icon', image: 'Bild', frame: 'Frame / Folie',
         embed: EMBEDS[it.kind]?.label || 'Modul', design: DESIGNS[it.kind]?.label || 'Design', html: 'HTML-Visualisierung' };
       html = `<div class="p-title">${names[type]}</div>`;
       // Inhalt
@@ -2290,7 +2317,7 @@ window.Board = (() => {
   function updateCtxBar() {
     const bar = $('.wb-ctx', root); if (!bar) return;
     const items = selItems();
-    const interactive = items.length === 1 && ['choice', 'features', 'palette', 'imgslot', 'summary', 'devlog'].includes(items[0].type); // dort würde die Leiste darüberliegende Listen verdecken
+    const interactive = items.length === 1 && ['choice', 'features', 'palette', 'imgslot', 'summary', 'devlog', 'lane'].includes(items[0].type); // dort würde die Leiste darüberliegende Listen verdecken
     if (!items.length || P.active || drag || tool !== 'select' || interactive) { bar.classList.add('hidden'); return; }
     const one = items.length === 1 ? items[0] : null;
     const key = items.map(i => i.id + (i.locked ? 'L' : '') + i.type).join(',');
@@ -2421,14 +2448,17 @@ window.Board = (() => {
     .sort((a, b) => (a.f.order ?? 1e9) - (b.f.order ?? 1e9) || a.f.y - b.f.y || a.f.x - b.f.x || a.idx - b.idx).map(x => x.f);
   function refreshToc() {
     const box = root && $('.wb-toc', root); if (!box || !uiPrefs.toc) return;
-    const frames = framesOrdered(); const q = (box.__q || '').toLowerCase();
+    const frames = framesOrdered(); const q = (box.__q || '').toLowerCase(); refreshToc.lastLane = null;
     const heads = data.items.filter(i => i.type === 'text' && (i.fs || 22) >= 28 && (i.text || '').trim());
     const list = frames.filter(f => !q || (f.title || '').toLowerCase().includes(q));
     const st = $('.toc-list', box)?.scrollTop || 0;
     box.innerHTML = `<div class="toc-head"><b>Inhalt</b><span class="muted small">${frames.length} Frames</span><button class="props-close" data-toc-close title="Schließen">×</button></div>
       <input class="input sm toc-search" placeholder="Frames suchen …" value="${esc(box.__q || '')}">
-      <div class="toc-list">${list.map((f, i) => { const n = data.items.filter(c => c.type !== 'frame' && inside(c, f)).length;
-        return `<div class="toc-item ${multi.includes(f.id) ? 'on' : ''}" data-toc="${f.id}"><span class="toc-n">${frames.indexOf(f) + 1}</span><span class="toc-t">${esc(f.title || 'Frame')}<small>${n} Elemente${f.export ? ` · ${f.export.w}×${f.export.h}` : ''}</small></span>
+      <div class="toc-list">${list.map((f, i) => { const n = data.items.filter(c => c.type !== 'frame' && c.type !== 'lane' && inside(c, f)).length;
+        const ln = data.items.find(l => l.type === 'lane' && !l.guide && inside(f, l)); let head = '';
+        if (ln && ln !== refreshToc.lastLane) head = `<div class="toc-sub toc-lane" data-toc-el="${ln.id}" style="--lc:${ln.c}">${esc(ln.ic || '')} Phase ${ln.no} · ${esc(ln.t)}</div>`;
+        refreshToc.lastLane = ln || null;
+        return head + `<div class="toc-item ${multi.includes(f.id) ? 'on' : ''}" data-toc="${f.id}"><span class="toc-n">${frames.indexOf(f) + 1}</span><span class="toc-t">${esc(f.title || 'Frame')}<small>${n} Elemente${f.export ? ` · ${f.export.w}×${f.export.h}` : ''}</small></span>
           <span class="toc-mv"><button data-toc-up="${f.id}" title="Nach oben (Reihenfolge für Präsentation)">▲</button><button data-toc-down="${f.id}" title="Nach unten">▼</button></span></div>`; }).join('') || '<div class="muted small" style="padding:10px">Noch keine Frames. Lege welche mit F an.</div>'}
       ${heads.length && !q ? `<div class="toc-sub">Überschriften</div>${heads.map(t2 => `<div class="toc-item head" data-toc-el="${t2.id}"><span class="toc-n">#</span><span class="toc-t">${esc(t2.text.split('\n')[0])}</span></div>`).join('')}` : ''}</div>
       <div class="toc-foot"><button class="pbtn wide" data-toc-all>Alles anzeigen</button></div>`;
@@ -2447,7 +2477,7 @@ window.Board = (() => {
           e.stopPropagation(); const fr = framesOrdered(); const id = d.tocUp || d.tocDown; const i = fr.findIndex(f => f.id === id); const j = d.tocUp ? i - 1 : i + 1;
           if (j < 0 || j >= fr.length) return; pushUndo(); [fr[i], fr[j]] = [fr[j], fr[i]]; fr.forEach((f, k) => { f.order = k + 1; }); scheduleSave(); return refreshToc();
         }
-        if (d.tocEl) { const it = find(d.tocEl); if (it) { flyTo(it, 120); select(it.id); } return; }
+        if (d.tocEl) { const it = find(d.tocEl); if (it) { flyTo(it.type === 'lane' ? { x: it.x, y: it.y, w: it.w, h: Math.min(it.h, it.w * 1.15) } : it, it.type === 'lane' ? 40 : 120); if (it.type !== 'lane') select(it.id); } return; }
         if (d.toc) { const f = find(d.toc); flyTo(f, 40); select(f.id); }
       });
     }
@@ -2743,9 +2773,6 @@ window.Board = (() => {
       'Funktionen': 'Allgemeine Funktionen', 'Navigation': 'Navigation', 'Wichtige Screens': 'Screens', 'UX-Prinzipien': 'UX-Anforderungen', 'Feedback & Animation': 'Interaktion & Feedback', 'Genre': 'Spiel-Genre', 'Steuerung': 'Steuerung', 'Fortschritt': 'Spielfortschritt', 'Look': 'Design-Stil', 'Speicherung': 'Daten & Backend', 'Tool': null,
       'Technik (falls gewünscht)': 'Technik', 'Geschäftsmodell': 'Monetarisierung', 'Wo erscheint die App?': 'Veröffentlichung', 'Komplexität': 'Umfang', 'Video-Format': null, 'Kapitel (abhaken beim Dreh)': null };
     const colors = ['#7C3AED', '#059669', '#EA580C', '#6366F1', '#DB2777', '#0284C7'];
-    if (!onlyBlock) add({ type: 'text', x: 0, y: -150, w: 1400, h: 64, text: 'App-Konzept · Vibe Coding', fs: 46, bold: true, color: '#1F1B2E' });
-    if (!onlyBlock) add({ type: 'note', x: 0, y: -70, w: 1300, h: 50, color: '#F5F3FF', fs: 15, align: 'left',
-      text: 'So geht’s: Optionen einfach anklicken · Doppelklick auf eine Liste = Optionen bearbeiten · Notizen mit „✦ Prompt“ fließen in den KI-Prompt ganz unten ein.' });
     const F = f => ({ t: f, f });  // Schrift mit Vorschau
     const T = (t, p, ask) => ({ t, p, ...(ask ? { ask } : {}) });  // Aufgabe für die KI
     const S = [
@@ -2801,14 +2828,12 @@ window.Board = (() => {
       ]],
       ['Monetarisierung', [{ ch: ['Geschäftsmodell', ['Kostenlos', 'Werbung', 'In-App-Käufe', 'Abo', 'Einmalkauf', 'Spenden', 'Nur Demo fürs Video'], { cols: 2 }] }]],
       ['Veröffentlichung', [{ ch: ['Wo erscheint die App?', ['Apple App Store', 'Google Play Store', 'Eigene Website', 'GitHub Pages', 'Vercel / Netlify', 'itch.io (Spiele)', 'Nur lokal / Demo'], { cols: 2 }] }]],
-      ['Umfang & Video', [
+      ['Umfang & MVP-Plan', [
         { ch: ['Komplexität', ['Mini (unter 1 Stunde)', 'Klein (1 Tag)', 'Mittel (Wochenende)', 'Groß (mehrere Wochen)'], { mode: 'single', cols: 2 }] },
-        { ch: ['Video-Format', ['YouTube Short', 'Tutorial (10–20 Min.)', 'Langes Projekt-Video', 'Mehrteilige Serie', 'Livestream'], { cols: 2 }] },
-      ]],
-      ['MVP-Plan', [
         { row: [{ note: 'MUSS (Version 1):\n• \n• \n• ', h: 190, prompt: true, color: '#D1FAE5', align: 'left' }, { note: 'SOLL:\n• \n• ', h: 190, prompt: true, color: '#FEF9C3', align: 'left' }, { note: 'KANN später:\n• \n• ', h: 190, color: '#FCE7F3', align: 'left' }] },
       ]],
       ['Video-Ablauf', [
+        { ch: ['Video-Format', ['YouTube Short', 'Tutorial (10–20 Min.)', 'Langes Projekt-Video', 'Mehrteilige Serie', 'Livestream'], { cols: 2 }] },
         { ch: ['Kapitel (abhaken beim Dreh)', ['Hook: fertige App zuerst zeigen', 'Die Idee erklären', 'Konzept auf diesem Board', 'Erster Prompt', 'Erster Prototyp', 'Iterieren & verbessern', 'Fehler & wie die KI sie löst', 'Design-Feinschliff', 'Ergebnis & Live-Test', 'Fazit + Call-to-Action'], { cols: 1 }] },
         { note: 'Hook-Idee für den Einstieg:', h: 80, color: '#FFEDD5' },
       ]],
@@ -2844,47 +2869,57 @@ window.Board = (() => {
         { note: 'Weitere Anweisungen an die KI (eine pro Zeile):\n• ', h: 110, color: '#EDE9FE', align: 'left', task: true },
       ]],
     ];
-    let col = 0, rowY = 0, rowH = 0, n = 0;
-    const W = FW - PAD * 2;
     if (onlyBlock === '__names') return S.map(e => e[0]);
-    // Nummern automatisch vergeben, damit neue Blöcke einfach ergänzt werden können
-    S.forEach((e, i) => { e[0] = `${i + 1} · ${e[0].replace(/^\d+ · /, '')}`; });
+    const byName = Object.fromEntries(S.map(e => [e[0], e[1]]));
     if (onlyBlock) { // nur einen einzelnen Block einfügen (für bestehende Boards)
-      const e = S.find(x => x[0].replace(/^\d+ · /, '') === onlyBlock); if (!e) return;
-      S.length = 0; S.push([e[0].replace(/^\d+ · /, ''), e[1]]);
+      const bl = byName[onlyBlock]; if (!bl) return;
+      const { kids, h } = layoutBlocks(bl, 0, 0, FW, '#7C3AED', LABELS);
+      add({ type: 'frame', x: 0, y: 0, w: FW, h, color: '#FFFFFF', title: onlyBlock }); kids.forEach(k => add(k)); return;
     }
-    S.forEach(([title, blocks]) => {
-      const color = colors[n % colors.length]; n++;
-      const fx = col * (FW + GAP), fy = rowY;
-      const { kids, h: fh } = layoutBlocks(blocks, fx, fy, FW, color, LABELS);
-      add({ type: 'frame', x: fx, y: fy, w: FW, h: fh, color: '#FFFFFF', title, order: n });
-      kids.forEach(k => add(k));
-      rowH = Math.max(rowH, fh);
-      col++; if (col >= COLS) { col = 0; rowY += rowH + GAP + 30; rowH = 0; }
-    });
-    if (onlyBlock) return;
-    if (col) rowY += rowH + GAP + 30;
-    const SW = COLS * FW + (COLS - 1) * GAP;
-    add({ type: 'frame', x: 0, y: rowY, w: SW, h: 520, color: '#F5F3FF', title: `${n + 1} · KI-Prompt (wird automatisch erstellt)`, order: n + 1 });
-    add({ type: 'summary', x: PAD, y: rowY + PAD + 4, w: SW - PAD * 2, h: 470, title: 'Dein Prompt für das Vibe-Coding-Tool' });
-    // Lebenszyklus nach dem ersten Entwurf
-    rowY += 520 + GAP + 60;
-    add({ type: 'text', x: 0, y: rowY, w: 1600, h: 56, text: 'Nach dem ersten Entwurf: Weiterentwickeln · Testen · Veröffentlichen', fs: 34, bold: true, color: '#1F1B2E' });
-    rowY += 110;
-    const ov = layoutBlocks([{ devlog: true }], 0, rowY, SW, '#7C3AED', LABELS);
-    add({ type: 'frame', x: 0, y: rowY, w: SW, h: ov.h, color: '#F5F3FF', title: `${n + 2} · Entwicklungsverlauf (Übersicht)`, order: 40, phase: 'overview' });
+    // ---- Phasen von links nach rechts (Swimlanes) ----
+    const PH = [
+      { ic: '💡', t: 'Idee & Zielgruppe', sub: 'Worum geht es – und für wen bauen wir die App?', c: '#7C3AED', b: ['App-Idee', 'App-Typ', 'Zielgruppe'] },
+      { ic: '🧩', t: 'Funktionen & Umfang', sub: 'Was soll die App können – und was kommt in Version 1?', c: '#6366F1', b: ['Endgerät & Plattform', 'Allgemeine Funktionen', 'Spezifische technische Funktionen', 'Umfang & MVP-Plan'] },
+      { ic: '🎮', t: 'Spiel', sub: 'Nur ausfüllen, wenn du ein Spiel baust – sonst einfach überspringen.', c: '#DB2777', b: ['Spiel: Mechanik', 'Spiel: Figuren, Welt & Story'] },
+      { ic: '🎨', t: 'Design & UX', sub: 'Wie sieht die App aus und wie fühlt sie sich an?', c: '#EA580C', b: ['Design: Stil, Farben & Schrift', 'UX & UI'] },
+      { ic: '⚙️', t: 'Technik & Business', sub: 'Womit bauen wir, wo liegen die Daten, wie verdient die App Geld?', c: '#0284C7', b: ['Daten & Backend', 'Vibe-Coding-Tool & Technik', 'Monetarisierung', 'Veröffentlichung'] },
+      { ic: '🤖', t: 'Prompt an die KI', sub: 'Alles von links fließt automatisch in diesen Prompt – kopieren & loslegen.', c: '#9333EA', b: ['KI-Anweisungen (Gespräch strukturieren)', '__prompt'] },
+      { ic: '🔁', t: 'Weiterentwickeln', sub: 'Ausprobieren, Fehler sammeln, neuen Prompt erzeugen – so oft du willst.', c: '#D97706', b: ['__iter'] },
+      { ic: '🧪', t: 'User Testing', sub: 'Echte Menschen probieren die App aus – wir sammeln Feedback.', c: '#0891B2', b: ['__test'] },
+      { ic: '🚀', t: 'Go-Live', sub: 'Die App wird veröffentlicht: Schritt für Schritt in den Store oder ins Netz.', c: '#059669', b: ['__live'] },
+      { ic: '🎬', t: 'Video', sub: 'Planung für dein YouTube-Video über das Projekt.', c: '#E11D48', b: ['Video-Ablauf'] },
+    ];
+    const LP = 40, LW = FW + LP * 2, LG = 150, HEAD = 210, VG = 60;
+    const totalW = PH.length * LW + (PH.length - 1) * LG;
+    // Kopfbereich
+    add({ type: 'text', x: 0, y: 0, w: 2400, h: 84, text: 'App-Konzept · Vibe Coding', fs: 64, bold: true, color: '#1F1B2E' });
+    add({ type: 'text', x: 0, y: 92, w: 2400, h: 40, text: 'Von der Idee bis zur veröffentlichten App – Phase für Phase von links nach rechts.', fs: 26, color: '#6B6680' });
+    add({ type: 'lane', guide: true, x: 0, y: 170, w: 1500, h: 300, c: '#7C3AED', ic: '👋', t: 'So funktioniert die Vorlage', locked: true,
+      steps: ['Optionen anklicken – fertig. „Sonstiges“ für eigene Angaben.', 'Notizen per Doppelklick ausfüllen. Mit „✦ Prompt“ markierte fließen in den Prompt.', 'In Phase 6 den fertigen Prompt kopieren und ins KI-Tool einfügen.', 'Danach: weiterentwickeln, testen, veröffentlichen – jede Phase hat ihren eigenen Prompt.'] });
+    const ov = layoutBlocks([{ devlog: true }], 1600, 170, 2600, '#7C3AED', LABELS);
+    add({ type: 'frame', x: 1600, y: 170, w: 2600, h: ov.h, color: '#F5F3FF', title: 'Entwicklungsverlauf (Übersicht)', order: 1, phase: 'overview' });
     ov.kids.forEach(k => add(k));
-    rowY += ov.h + GAP + 30;
-    const it1 = layoutBlocks(iterationBlocks(1), 0, rowY, FW + 120, '#EA580C', LABELS);
-    add({ type: 'frame', x: 0, y: rowY, w: FW + 120, h: it1.h, color: '#FFFFFF', title: 'Weiterentwicklung #1', order: 41, phase: 'iteration', iterNo: 1, created: today() });
-    it1.kids.forEach(k => add(k));
-    rowY += it1.h + GAP + 30;
-    const ts = layoutBlocks(testingBlocks(), 0, rowY, FW + 120, '#0284C7', LABELS);
-    add({ type: 'frame', x: 0, y: rowY, w: FW + 120, h: ts.h, color: '#FFFFFF', title: 'User Testing', order: 90, phase: 'testing' });
-    ts.kids.forEach(k => add(k));
-    const gl = layoutBlocks(goliveBlocks(), FW + 120 + GAP, rowY, FW + 120, '#059669', LABELS);
-    add({ type: 'frame', x: FW + 120 + GAP, y: rowY, w: FW + 120, h: gl.h, color: '#FFFFFF', title: 'Go-Live (Veröffentlichung)', order: 91, phase: 'golive' });
-    gl.kids.forEach(k => add(k));
+    const top = 170 + Math.max(300, ov.h) + 140;
+    const lanes = [];
+    PH.forEach((ph, pi) => {
+      const lx = pi * (LW + LG); let cy = top + HEAD; let k = 0;
+      const frame = (title, blocks, extra = {}) => {
+        k++; const lay = layoutBlocks(blocks, lx + LP, cy, FW, ph.c, LABELS);
+        add({ type: 'frame', x: lx + LP, y: cy, w: FW, h: lay.h, color: '#FFFFFF', title: `${pi + 1}.${k} · ${title}`, order: (pi + 1) * 100 + k, ...extra });
+        lay.kids.forEach(kd => add(kd)); cy += lay.h + VG;
+      };
+      ph.b.forEach(name => {
+        if (name === '__prompt') frame('KI-Prompt (wird automatisch erstellt)', [{ sum: { mode: 'main', title: 'Dein Prompt für das Vibe-Coding-Tool', h: 820 } }]);
+        else if (name === '__iter') frame('Weiterentwicklung #1', iterationBlocks(1), { phase: 'iteration', iterNo: 1, created: today(), order: 701 });
+        else if (name === '__test') frame('User Testing', testingBlocks(), { phase: 'testing' });
+        else if (name === '__live') frame('Go-Live (Veröffentlichung)', goliveBlocks(), { phase: 'golive' });
+        else frame(name, byName[name]);
+      });
+      lanes.push({ type: 'lane', x: lx, y: top, w: LW, h: cy - top - VG + LP, c: ph.c, ic: ph.ic, no: pi + 1, t: ph.t, sub: ph.sub, last: pi === PH.length - 1, locked: true });
+    });
+    const LH = Math.max(...lanes.map(l => l.h));
+    lanes.forEach(l => add({ ...l, h: LH }));
+    void totalW;
   }
 
   /** legt Blöcke untereinander in einem Frame an (relativ zu fx/fy) */
@@ -2957,11 +2992,15 @@ window.Board = (() => {
     const iters = data.items.filter(f => f.type === 'frame' && f.phase === 'iteration').sort((a, b) => (a.iterNo || 0) - (b.iterNo || 0));
     const n = (iters.length ? Math.max(...iters.map(f => f.iterNo || 0)) : 0) + 1;
     const FW = 740; let x, y;
-    if (iters.length) { const last = iters[iters.length - 1]; x = last.x + last.w + 80; y = last.y; }
+    let lane = null;
+    if (iters.length) { const last = iters[iters.length - 1]; lane = data.items.find(l => l.type === 'lane' && !l.guide && inside(last, l));
+      if (lane) { x = last.x; y = Math.max(...iters.filter(f => inside(f, lane)).map(f => f.y + f.h)) + 60; } else { x = last.x + last.w + 80; y = last.y; } }
     else { const ov = data.items.find(f => f.type === 'frame' && f.phase === 'overview'); if (ov) { x = ov.x; y = ov.y + ov.h + 100; } else { const b = data.items.length ? bbox(data.items) : { x: 0, y: 0, w: 0, h: 0 }; x = b.x + b.w + 150; y = b.y; } }
-    const lay = layoutBlocks(iterationBlocks(n), x, y, FW, '#EA580C');
+    const fw = lane ? iters[iters.length - 1].w : FW;
+    const lay = layoutBlocks(iterationBlocks(n), x, y, fw, lane ? lane.c : '#EA580C');
     pushUndo();
-    const frame = { id: uid(), type: 'frame', x, y, w: FW, h: lay.h, color: '#FFFFFF', title: `Weiterentwicklung #${n}`, order: 40 + n, phase: 'iteration', iterNo: n, created: today() };
+    if (lane) { const need = y + lay.h + 40 - lane.y; if (need > lane.h) lane.h = need; }
+    const frame = { id: uid(), type: 'frame', x, y, w: fw, h: lay.h, color: '#FFFFFF', title: lane ? `${iters[0].title.match(/^\d+/)?.[0] || 7}.${n} · Weiterentwicklung #${n}` : `Weiterentwicklung #${n}`, order: (lane ? 700 : 40) + n, phase: 'iteration', iterNo: n, created: today() };
     const kids = lay.kids.map(k => ({ id: uid(), ...k }));
     // die Status-Auswahl der vorherigen Runde auf „Erledigt“ vorschlagen? – bewusst nicht automatisch
     data.items.unshift(frame); data.items.push(...kids);
