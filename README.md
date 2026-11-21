@@ -58,15 +58,39 @@ Dazu kommen 12 Beitragsvorlagen, eigene Vorlagen und KI-Texte.
 - **Rechtecke:** Eckenradius bis 200 px. Per Klick auf die Ecken der kleinen Vorschau wählst du, welche Ecken gerundet werden. Dazu gibt es Vorgaben (Alle, Keine, Oben, Unten, Links, Rechts, Diagonal). Bei mehreren ausgewählten Rechtecken lässt sich das für alle gleichzeitig einstellen.
 - **Pfeiltasten** verschieben (mit Shift in 10er-Schritten). **Strg+L** sperrt Elemente. **Rechtsklick** öffnet ein Kontextmenü.
 - **Stift (B):** freihand zeichnen mit Farbe und Strichstärke.
+- **Werkzeugleiste, Eigenschaften und Inhaltsverzeichnis ein- und ausblenden:** über die Schalter oben rechts. Die Werkzeugleiste lässt sich scrollen, falls das Fenster zu niedrig ist.
+- **Inhaltsverzeichnis:** listet alle Frames und große Überschriften. Ein Klick fliegt hin, mit ▲▼ änderst du die Reihenfolge (auch für die Präsentation). Es gibt eine Suche.
+- **Sprung-Links:** Jedes Element und jeder Frame lässt sich im Eigenschaften-Panel unter „Verlinken“ mit einem Frame verbinden. Ein Klick auf den Link springt dorthin, mit „↩ Zurück“ geht es zurück. Das funktioniert auch im Präsentationsmodus.
+- **Drehen:** am orangen ⟳-Griff ziehen (mit Shift in 15°-Schritten, rastet bei 0/90/180° ein) oder 90°-Knopf in der schwebenden Leiste.
+- **Text ausrichten:** horizontal (links, Mitte, rechts) und **vertikal (oben, Mitte, unten)**, dazu **Abstand zum Rand** einstellbar.
 - **Tastenkürzel-Übersicht:** ? oder das Tastatur-Symbol oben.
 
-## Vorlage „App-Konzept (Vibe Coding)“ (neu)
+## Vorlage „App-Konzept (Vibe Coding)“
 Für die Planung von Apps, Handyspielen und Web-Apps, die du mit KI baust (z. B. für YouTube-Videos). Du findest sie unter „Board-Vorlage“ oder beim Anlegen eines neuen Boards („+ Board“ → Vorlage).
 
-- **15 Frames**, einer pro Entwicklungsthema: App-Idee, App-Typ, Zielgruppe, Endgerät & Plattform, Kernfunktionen, Spielmechanik, Design & Stil, Daten & Backend, Vibe-Coding-Tool & Technik, Monetarisierung, Veröffentlichung, Umfang & Video, MVP-Plan, Video-Ablauf und KI-Prompt.
-- **Auswahllisten:** Optionen einfach anklicken. Je nach Liste ist eine Option oder es sind mehrere möglich. Ein Doppelklick bearbeitet Überschrift und Optionen (eine pro Zeile, `[x]` = ausgewählt). Über das Eigenschaften-Panel stellst du Spalten und Farbe ein oder lässt nur das Ausgewählte anzeigen, was sich gut fürs Video eignet. Eigene Auswahllisten legst du mit dem Listen-Werkzeug oder der Taste K an.
-- **KI-Prompt (automatisch):** Er sammelt live alle ausgewählten Optionen und alle Notizen mit „✦ In KI-Prompt übernehmen“. Unausgefüllte Platzhalter werden übersprungen. Mit „Kopieren“ fügst du ihn direkt in Claude, Cursor & Co. ein. Einleitung und Abschluss lassen sich per Doppelklick anpassen.
-- **Anpassen & speichern:** Ändere Frames, Listen und Notizen beliebig, dann „Board-Vorlage“ → „Aktuelles Board als Vorlage speichern“. Das geht für das ganze Board oder nur die Auswahl, optional mit zurückgesetzten Auswahlen. Eigene Vorlagen stehen danach in jedem Board und beim Anlegen neuer Boards zur Verfügung und lassen sich umbenennen oder löschen.
+**19 Frames:** App-Idee · App-Typ · Zielgruppe · Endgerät & Plattform · Allgemeine Funktionen · **Spezifische technische Funktionen** · Spiel: Mechanik · **Spiel: Figuren, Welt & Story** · **Design: Stil, Farben & Schrift** · UX & UI · Daten & Backend · Vibe-Coding-Tool & Technik · Monetarisierung · Veröffentlichung · Umfang & Video · MVP-Plan · Video-Ablauf · **KI-Anweisungen** · KI-Prompt
+
+- **Auswahllisten:** Optionen anklicken. Fast jede Liste hat **„Sonstiges“** mit Freitext. Ein Doppelklick bearbeitet Überschrift, Optionen und die Bezeichnung im Prompt. Eigene Listen legst du mit der Taste K an.
+- **Spezifische technische Funktionen:** eigene Liste mit beliebig vielen Funktionen (auch mehrere auf einmal, eine pro Zeile). Jede Funktion bekommt eine **Priorität Hoch, Mittel oder Niedrig**, die du per Klick umschaltest. Die Liste lässt sich nach Priorität sortieren.
+- **Spiele:** Notizen für Hauptfigur, Gegner, Setting/Welt und Story. Dazu **Bild-Platzhalter**: per Klick oder Drag & Drop ein Bild hinterlegen. ⚠️ Der Prompt enthält nur Text. Die Bilder musst du im KI-Tool zusätzlich hochladen, der Prompt weist darauf hin.
+- **Farbpalette:** Primär, Sekundär, Akzent, Hintergrund und Text, mit **14 fertigen Paletten** oder eigenen Farben (Farbwähler oder Hex-Code). Die Hex-Codes landen automatisch im Prompt.
+- **Schriftarten** für Überschriften und Fließtext, mit Vorschau in der jeweiligen Schrift. Für die Vorschau ist Internet nötig.
+- **KI-Anweisungen:** Hier strukturierst du das Gespräch mit der KI:
+  - **Rolle der KI**, z. B. Mentor für Einsteiger oder Game-Developer
+  - **Arbeitsweise**, z. B. erst Rückfragen stellen, in kleinen Schritten arbeiten, einsteigerfreundlich erklären, erst Plan dann Code
+  - **Zusätzliche Aufgaben**, z. B. Benchmark-Analyse, ergänzende Funktionen vorschlagen, Wettbewerbsfähigkeit einschätzen, klickbaren Prototyp erstellen, Testanleitung schreiben, Code ins Git-Repository pushen (fragt nach dem Link), README, Deployment, DSGVO- und Barrierefreiheits-Check, App-Store-Texte, Ideen für Videotitel und Thumbnail
+  - eine Notiz für eigene Anweisungen
+- **KI-Prompt (automatisch):** baut sich live auf aus Rolle, ausgefüllten Notizen, Anforderungen, Farbpalette, priorisierten Funktionen, Referenzbildern, Arbeitsweise und nummerierten Aufgaben. Mit „Kopieren“ landet er in der Zwischenablage.
+### Von der Idee bis zur Veröffentlichung
+Unter dem ersten Prompt begleitet dich die Vorlage weiter:
+- **Entwicklungsverlauf (Übersicht):** zeigt automatisch den Fortschritt in vier Schritten (Konzept, Weiterentwicklung, User Testing, Go-Live) und listet alle Weiterentwicklungs-Runden mit Datum, Status und erledigten/offenen Punkten (🐞 Fehler, ✨ Funktionen, ⚙️ Verbesserungen). Ein Klick springt zur Runde. Mit „+ Neue Weiterentwicklungs-Runde“ legst du beliebig viele Runden an.
+- **Weiterentwicklung #N:** Status (Geplant/In Arbeit/Getestet/Erledigt), Schwerpunkt, drei Listen mit Priorität für **Fehler**, **fehlende/neue Funktionen** und **Verbesserungen**, Notizen für „Was funktioniert schon gut?“ und Fehlermeldungen, Screenshot-Platzhalter und ein **eigener Prompt** für genau diese Runde. Punkte lassen sich abhaken; erledigte Punkte verschwinden aus dem Prompt und zählen im Verlauf.
+- **User Testing:** Testmethode, Testgeräte, Testpersonen, Testaufgaben, Feedback-Notiz und ein Prompt für Testplan, Fragebogen, Feedback-Auswertung oder Beta-Test-Einrichtung.
+- **Go-Live:** Wo veröffentlichen (Google Play, App Store, Web, itch.io …), was schon vorhanden ist (Entwicklerkonto, Datenschutzerklärung, Impressum, Icon …), App-Name und Termin. Der Prompt fordert eine **Schritt-für-Schritt-Anleitung** mit allen Voraussetzungen, Kosten und Stolperfallen an, optional Launch-Checkliste, Store-Texte oder Social-Media-Launch-Plan.
+- Ältere Konzept-Boards: „Board-Vorlage → App-Konzept: Verlauf, Testing & Go-Live nachrüsten“. Neue Runde auch über „Board-Vorlage → App-Konzept: neue Weiterentwicklungs-Runde“.
+
+- **Einzelne Blöcke nachrüsten:** „Board-Vorlage → App-Konzept: einzelnen Block einfügen …“
+- **Anpassen & speichern:** „Board-Vorlage → Aktuelles Board als Vorlage speichern“, für das ganze Board oder nur die Auswahl, optional mit zurückgesetzten Auswahlen.
 
 ## Social-Media-Frames (neu)
 Frame-Werkzeug (F) → Bereich „Social Media“. Alle Formate haben exakte Pixelmaße:

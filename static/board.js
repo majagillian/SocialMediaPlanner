@@ -76,6 +76,8 @@ window.Board = (() => {
   let designTheme = 0;
   let multi = []; // Mehrfachauswahl (IDs)
   let penColor = '#7C3AED', penWidth = 4;
+  let uiPrefs = (() => { try { return { tools: true, toc: false, ...JSON.parse(localStorage.getItem('vp-ui') || '{}') }; } catch { return { tools: true, toc: false }; } })();
+  const saveUi = () => { try { localStorage.setItem('vp-ui', JSON.stringify(uiPrefs)); } catch { /* egal */ } };
   let replaceImageTarget = null, mouseWorld = { x: 0, y: 0 }, propsOpen = (() => { try { return localStorage.getItem('vp-props') !== '0'; } catch { return true; } })();
   let lastShapeColors = ['#EDE9FE', '#7C3AED']; // zuletzt gewählte Schnellfarbe für neue Formen
 
@@ -128,6 +130,11 @@ window.Board = (() => {
           <span class="grow"></span>
           <button class="btn sm ghost" data-b="template">${ic('layout-template', '#7C3AED', 'ic sm')} Board-Vorlage</button>
           <button class="btn sm ghost" data-b="timer">${ic('timer', '#7C3AED', 'ic sm')} Timer</button>
+          <div class="seg wb-toggles" title="Bereiche ein-/ausblenden">
+            <button data-b="toc" title="Inhaltsverzeichnis der Frames">${ic('list-tree', '#6B6780', 'ic sm')}<span>Inhalt</span></button>
+            <button data-b="tools" title="Werkzeugleiste ein-/ausblenden">${ic('pencil-ruler', '#6B6780', 'ic sm')}<span>Werkzeuge</span></button>
+            <button data-b="propsp" title="Eigenschaften-Panel ein-/ausblenden">${ic('sliders-horizontal', '#6B6780', 'ic sm')}<span>Eigenschaften</span></button>
+          </div>
           <button class="btn sm ghost" data-b="help" title="Tastenkürzel & Bedienung (?)">${ic('keyboard', '#6B6780', 'ic sm')}</button>
           <button class="btn sm ghost" data-b="undo" title="Rückgängig (Strg+Z)">${ic('undo-2', '#6B6780', 'ic sm')}</button>
           <div class="zoom"><button data-b="zoomout">−</button><span class="wb-zoom">100%</span><button data-b="zoomin">+</button></div>
@@ -155,6 +162,7 @@ window.Board = (() => {
           <i class="sep"></i>
           <button class="tool embed-tool" data-tool="embed" title="Modul einbetten (E)">${ic('blocks', '#FFFFFF', 'ic')}</button>
         </div>
+        <div class="wb-toc"></div>
         <div class="wb-viewport"><div class="wb-world"><svg class="wb-links" width="1" height="1"></svg></div></div>
         <div class="wb-props hidden"></div>
         <div class="wb-ctx hidden"></div>
@@ -185,7 +193,7 @@ window.Board = (() => {
     document.addEventListener('paste', onPaste); document.addEventListener('fullscreenchange', onFs);
     listeners.add(onData);
 
-    render(); setTool('select');
+    render(); setTool('select'); applyUi();
     try { // Vorlage für ein frisch angelegtes Board anwenden
       const pend = JSON.parse(localStorage.getItem('vp-board-tpl') || 'null');
       if (pend && pend.id === board.id) { localStorage.removeItem('vp-board-tpl'); setTimeout(() => applyTemplate(pend.tpl), 50); }
@@ -227,6 +235,9 @@ window.Board = (() => {
       if (a === 'template') applyTemplate();
       if (a === 'timer') Timer.toggle();
       if (a === 'help') showShortcuts();
+      if (a === 'tools') { uiPrefs.tools = !uiPrefs.tools; saveUi(); applyUi(); }
+      if (a === 'propsp') { propsOpen = !propsOpen; try { localStorage.setItem('vp-props', propsOpen ? '1' : '0'); } catch { /* egal */ } applyUi(); renderProps(); $('.wb-ctx', root).dataset.key = ''; updateCtxBar(); }
+      if (a === 'toc') { uiPrefs.toc = !uiPrefs.toc; saveUi(); applyUi(); }
       if (a === 'present') startPresentation();
       if (a === 'new') {
         const own = getSetting('boardTemplates', []);
@@ -276,17 +287,24 @@ window.Board = (() => {
 
   // ---------- Auswahllisten & KI-Prompt -----------------------------------
   function choiceHeight(it) {
-    const n = it.onlySelected ? Math.max(1, (it.options || []).filter(o => o.on).length) : (it.options || []).length;
-    return 52 + Math.ceil(Math.max(1, n) / (it.cols || 1)) * 33 + 10;
+    const n = (it.onlySelected ? Math.max(1, (it.options || []).filter(o => o.on).length) : (it.options || []).length) + (it.other ? (it.cols || 1) : 0);
+    return 58 + Math.ceil(Math.max(1, n) / (it.cols || 1)) * 37 + 8;
   }
-  function makeChoice(title, options, { mode = 'multi', cols = 1, color = '#7C3AED', w = 560, sel = [] } = {}) {
-    const it = { type: 'choice', title, mode, cols, color, w, options: options.map(t => ({ t, on: sel.includes(t) })) };
+  function makeChoice(title, options, { mode = 'multi', cols = 1, color = '#7C3AED', w = 560, sel = [], other = false, section, label, noPrompt } = {}) {
+    const it = { type: 'choice', title, mode, cols, color, w, other, options: options.map(t => typeof t === 'string' ? { t, on: sel.includes(t) } : { ...t, on: sel.includes(t.t) }) };
+    if (section) it.section = section; if (label) it.label = label; if (noPrompt) it.noPrompt = true;
     it.h = choiceHeight(it); return it;
   }
-  function toggleOption(it, i) {
-    pushUndo();
+  async function toggleOption(it, i) {
     const o = it.options[i]; if (!o) return;
-    if (it.mode === 'single') { const was = o.on; it.options.forEach(x => { x.on = false; }); o.on = !was; } else o.on = !o.on;
+    let val = null;
+    if (o.ask && !o.on) { // Option braucht eine Angabe (z. B. Repository-Link)
+      const v = await openForm({ title: o.t, values: { val: o.val || '' }, submitLabel: 'Auswählen', fields: [{ key: 'val', label: o.ask, required: true }] });
+      if (!v) return; val = v.val.trim();
+    }
+    pushUndo();
+    if (val != null) o.val = val;
+    if (it.mode === 'single') { const was = o.on; it.options.forEach(x => { x.on = false; }); o.on = !was; if (o.on) it.otherText = ''; } else o.on = !o.on;
     if (it.onlySelected) it.h = choiceHeight(it);
     updateVisual(it); refreshSummaries(); renderProps(); scheduleSave();
   }
@@ -294,50 +312,203 @@ window.Board = (() => {
     const v = await openForm({
       title: 'Auswahlliste bearbeiten', submitLabel: 'Übernehmen',
       extra: '<p class="muted small" style="margin:-6px 0 12px">Eine Option pro Zeile. Mit <b>[x]</b> am Zeilenanfang ist sie ausgewählt. Auf dem Board schaltest du Optionen einfach per Klick um.</p>',
-      values: { title: it.title, label: it.label || '', mode: it.mode || 'multi', cols: it.cols || 1, options: (it.options || []).map(o => (o.on ? '[x] ' : '') + o.t).join('\n') },
+      values: { other: !!it.other, title: it.title, label: it.label || '', mode: it.mode || 'multi', cols: it.cols || 1, options: (it.options || []).map(o => (o.on ? '[x] ' : '') + o.t).join('\n') },
       fields: [
         { key: 'title', label: 'Überschrift', required: true, half: true },
         { key: 'label', label: 'Bezeichnung im KI-Prompt (optional)', half: true },
         { key: 'mode', label: 'Auswahl', type: 'select', half: true, options: [['multi', 'Mehrere Optionen'], ['single', 'Nur eine Option']] },
         { key: 'cols', label: 'Spalten', type: 'select', half: true, numeric: true, options: [[1, '1 Spalte'], [2, '2 Spalten'], [3, '3 Spalten']] },
         { key: 'options', label: 'Optionen', type: 'textarea', rows: 10 },
+        { key: 'other', label: '„Sonstiges“ mit Freitext anbieten', type: 'checkbox' },
       ],
     });
     if (!v) return;
     pushUndo();
     it.title = v.title; it.label = v.label || ''; it.mode = v.mode; it.cols = v.cols || 1;
-    it.options = v.options.split('\n').map(l => l.trim()).filter(Boolean).map(l => ({ on: /^\[x\]/i.test(l), t: l.replace(/^\[[ x]?\]\s*/i, '') }));
+    const prev = Object.fromEntries((it.options || []).map(o => [o.t, o]));
+    it.options = v.options.split('\n').map(l => l.trim()).filter(Boolean).map(l => { const t = l.replace(/^\[[ x]?\]\s*/i, ''); return { ...(prev[t] || {}), on: /^\[x\]/i.test(l), t }; });
+    it.other = !!v.other;
     if (it.mode === 'single') { let seen = false; it.options.forEach(o => { if (o.on && seen) o.on = false; if (o.on) seen = true; }); }
     it.h = Math.max(it.h, choiceHeight(it)); rerenderItem(it); refreshSummaries();
   }
+  const PALETTES = [
+    ['Violet Planner', ['#7C3AED', '#34D399', '#FB923C', '#FFFFFF', '#1F1B2E']], ['Ozean', ['#0EA5E9', '#0F766E', '#F59E0B', '#F0F9FF', '#0C4A6E']],
+    ['Sonnenuntergang', ['#F97316', '#DB2777', '#FACC15', '#FFF7ED', '#431407']], ['Wald', ['#15803D', '#A3E635', '#CA8A04', '#F7FEE7', '#14532D']],
+    ['Neon-Nacht', ['#A855F7', '#22D3EE', '#F472B6', '#0B0B1A', '#F5F3FF']], ['Pastell', ['#A78BFA', '#5EEAD4', '#FDBA74', '#FFFBF5', '#3F3F46']],
+    ['Minimal Mono', ['#111827', '#6B7280', '#2563EB', '#FFFFFF', '#111827']], ['Retro-Arcade', ['#FF006E', '#3A86FF', '#FFBE0B', '#1A1A2E', '#FFFFFF']],
+    ['Kinder bunt', ['#EF4444', '#3B82F6', '#FACC15', '#FFFFFF', '#1F2937']], ['Business', ['#1E3A8A', '#64748B', '#10B981', '#F8FAFC', '#0F172A']],
+    ['Candy', ['#EC4899', '#8B5CF6', '#22D3EE', '#FDF2F8', '#500724']], ['Erdtöne', ['#9A3412', '#78716C', '#65A30D', '#FAFAF9', '#292524']],
+    ['Cyberpunk', ['#FDE047', '#06B6D4', '#E11D48', '#09090B', '#FAFAFA']], ['Gaming Dark', ['#22C55E', '#6366F1', '#F43F5E', '#111827', '#F9FAFB']],
+  ];
+  const PAL_ROLES = ['Primär', 'Sekundär', 'Akzent', 'Hintergrund', 'Text'];
+  async function itemAction(it, act) {
+    const [a, arg] = act.split(':'); const i = Number(arg);
+    if (a === 'ch-other') {
+      const v = await openForm({ title: `${it.title}: Sonstiges`, values: { t: it.otherText || '' }, submitLabel: 'Übernehmen', fields: [{ key: 't', label: 'Eigene Angabe (leer lassen = nicht ausgewählt)', type: 'textarea', rows: 2 }] });
+      if (!v) return; pushUndo(); it.otherText = v.t.trim();
+      if (it.mode === 'single' && it.otherText) it.options.forEach(o => { o.on = false; });
+      updateVisual(it); refreshSummaries(); return scheduleSave();
+    }
+    if (a === 'fx-add' || a === 'fx-edit') {
+      const r = a === 'fx-edit' ? it.rows[i] : null;
+      const v = await openForm({ title: r ? 'Funktion bearbeiten' : 'Technische Funktionen hinzufügen', submitLabel: r ? 'Übernehmen' : 'Hinzufügen', values: { t: r?.t || '', prio: r?.prio || 'mittel' },
+        extra: r ? '' : '<p class="muted small" style="margin:-6px 0 12px">Mehrere Funktionen auf einmal: eine pro Zeile. Möglichst konkret, z. B. „Spielstand wird automatisch in der Cloud gespeichert“.</p>',
+        fields: [{ key: 't', label: r ? 'Funktion' : 'Funktion(en)', type: r ? 'text' : 'textarea', rows: 4, required: true }, { key: 'prio', label: 'Priorität', type: 'select', options: [['hoch', 'Hoch – unverzichtbar'], ['mittel', 'Mittel – wichtig'], ['niedrig', 'Niedrig – nice to have']] }] });
+      if (!v) return; pushUndo();
+      if (r) { r.t = v.t.trim(); r.prio = v.prio; } else v.t.split('\n').map(x => x.trim()).filter(Boolean).forEach(t => it.rows.push({ t, prio: v.prio }));
+      updateVisual(it); refreshSummaries(); return scheduleSave();
+    }
+    if (a === 'fx-prio') { pushUndo(); const order = ['hoch', 'mittel', 'niedrig']; const r = it.rows[i]; r.prio = order[(order.indexOf(r.prio || 'mittel') + 1) % 3]; updateVisual(it); refreshSummaries(); return scheduleSave(); }
+    if (a === 'fx-done') { pushUndo(); it.rows[i].done = !it.rows[i].done; updateVisual(it); refreshSummaries(); return scheduleSave(); }
+    if (a === 'iter-new') return addIteration();
+    if (a === 'dl-go') return jumpToFrame(arg);
+    if (a === 'fx-del') { pushUndo(); it.rows.splice(i, 1); updateVisual(it); refreshSummaries(); return scheduleSave(); }
+    if (a === 'fx-sort') { pushUndo(); const o = { hoch: 0, mittel: 1, niedrig: 2 }; it.rows.sort((x, y) => o[x.prio || 'mittel'] - o[y.prio || 'mittel']); updateVisual(it); refreshSummaries(); return scheduleSave(); }
+    if (a === 'pal-edit') {
+      const c = it.colors[i];
+      const v = await openForm({ title: `${c.role}-Farbe`, values: { pick: c.hex, hex: c.hex, role: c.role }, submitLabel: 'Übernehmen',
+        fields: [{ key: 'pick', label: 'Farbe wählen', type: 'color', half: true }, { key: 'hex', label: 'oder Hex-Code eingeben (hat Vorrang, wenn geändert)', half: true }, { key: 'role', label: 'Bezeichnung' }] });
+      if (!v) return; pushUndo();
+      const hx = /^#?[0-9a-f]{6}$/i.test(v.hex.trim()) && v.hex.trim().replace('#', '').toLowerCase() !== c.hex.replace('#', '').toLowerCase() ? '#' + v.hex.trim().replace('#', '') : v.pick;
+      c.hex = hx.toUpperCase(); c.role = v.role || c.role; it.name = 'Eigene Palette';
+      updateVisual(it); refreshSummaries(); return scheduleSave();
+    }
+    if (a === 'pal-choose') {
+      const el = h(`<div class="modal-backdrop"><div class="modal pal-modal"><h3>Farbpalette wählen</h3>
+        <div class="pal-grid">${PALETTES.map(([n, cs], k) => `<button class="pal-opt" data-k="${k}"><span class="pal-strip">${cs.map(c => `<i style="background:${c}"></i>`).join('')}</span><b>${esc(n)}</b></button>`).join('')}</div>
+        <div class="modal-actions"><span class="muted small">Einzelne Farben änderst du danach per Klick auf das Farbfeld.</span><span class="grow"></span><button class="btn ghost" data-x>Abbrechen</button></div></div></div>`);
+      const close = () => el.remove(); el.addEventListener('mousedown', e => { if (e.target === el) close(); }); $('[data-x]', el).onclick = close;
+      el.onclick = e => { const b = e.target.closest('[data-k]'); if (!b) return; const [n, cs] = PALETTES[b.dataset.k]; pushUndo(); it.name = n; it.colors = cs.map((hx, k) => ({ role: PAL_ROLES[k], hex: hx })); close(); updateVisual(it); refreshSummaries(); scheduleSave(); };
+      $('#modal-root').appendChild(el); return;
+    }
+    if (a === 'slot-pick') { replaceImageTarget = it; return $('.wb-file', root).click(); }
+  }
+
   /** Reihenfolge: nach Frames (Folien-Nr./Position), darin von oben nach unten */
   function orderedByFrames(list) {
     const frames = data.items.filter(i => i.type === 'frame').sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || a.y - b.y || a.x - b.x);
     const fi = it => { const cx = it.x + it.w / 2, cy = it.y + it.h / 2; const k = frames.findIndex(f => cx >= f.x && cx <= f.x + f.w && cy >= f.y && cy <= f.y + f.h); return k < 0 ? 1e6 : k; };
     return [...list].sort((a, b) => fi(a) - fi(b) || a.y - b.y || a.x - b.x);
   }
-  function buildPrompt(sum) {
-    const choices = orderedByFrames(data.items.filter(i => i.type === 'choice'));
-    const notes = orderedByFrames(data.items.filter(i => (i.type === 'note' || i.type === 'text' || SHAPES.includes(i.type)) && i.promptInclude && (i.text || '').trim()));
+  // ---------- Prompt-Bausteine ---------------------------------------------
+  const frameOf = it => { const cx = it.x + it.w / 2, cy = it.y + it.h / 2; return data.items.find(f => f.type === 'frame' && f !== it && cx >= f.x && cx <= f.x + f.w && cy >= f.y && cy <= f.y + f.h); };
+  const inPhase = it => !!frameOf(it)?.phase;
+  const PROMPT_TYPES = ['choice', 'note', 'text', 'features', 'palette', 'image', 'rect', 'ellipse', 'diamond', 'shape'];
+  const optText = o => o.val ? `${o.t} (${o.val})` : o.t;
+  const picked = c => [...(c.options || []).filter(o => o.on), ...(c.other && (c.otherText || '').trim() ? [{ t: c.otherText.trim(), p: c.otherText.trim() }] : [])];
+  function noteLine(n) {
+    if (n.ph && n.text.trim() === n.ph.trim()) return null;
+    const ls = n.text.split('\n').map(l => l.trim()).filter(l => l && !/^[•\-–*]\s*$/.test(l) && !/…$/.test(l));
+    if (!ls.length) return null;
+    if (/:$/.test(ls[0])) { if (ls.length === 1) return null; return ls.length === 2 ? `${ls[0]} ${ls[1].replace(/^[•\-–*]\s*/, '')}` : `${ls[0]}\n${ls.slice(1).map(l => '  ' + (l.startsWith('•') ? l : '• ' + l)).join('\n')}`; }
+    const m = ls[0].match(/^(.+?:)\s*(.+)$/); if (m && ls.length === 1) return `${m[1]} ${m[2]}`;
+    return ls.join('\n');
+  }
+  /** sammelt alle Prompt-Inhalte aus einer Menge von Elementen */
+  function collectParts(items) {
+    const ord = orderedByFrames(items);
+    const choices = ord.filter(i => i.type === 'choice');
+    const parts = {};
+    parts.role = choices.find(c => c.section === 'role' && !c.noPrompt && picked(c).length);
+    parts.notes = ord.filter(i => (i.type === 'note' || i.type === 'text' || SHAPES.includes(i.type)) && i.promptInclude && !i.taskNote && (i.text || '').trim()).map(noteLine).filter(Boolean);
+    parts.req = choices.filter(c => !c.noPrompt && !c.section && !c.haveList).map(c => [c.label || c.title, picked(c).map(optText), c]).filter(([, l]) => l.length);
+    ord.filter(i => i.type === 'palette' && !i.noPrompt).forEach(pl => parts.req.push([`${pl.title || 'Farbpalette'}${pl.name ? ` („${pl.name}“)` : ''}`, [(pl.colors || []).map(c => `${c.role} ${c.hex.toUpperCase()}`).join(', ')]]));
+    // Listen „bereits vorhanden / noch nicht vorhanden“ (z. B. Go-Live-Voraussetzungen)
+    parts.have = choices.filter(c => c.haveList && !c.noPrompt).map(c => ({ c, yes: picked(c).map(optText), no: (c.options || []).filter(o => !o.on).map(o => o.t) }));
+    const o = { hoch: 0, mittel: 1, niedrig: 2 };
+    parts.features = ord.filter(i => i.type === 'features' && !i.noPrompt).map(fx => ({ title: fx.label || fx.title || 'Funktionen', rows: [...(fx.rows || [])].filter(r => !r.done).sort((a, b) => o[a.prio || 'mittel'] - o[b.prio || 'mittel']) })).filter(f => f.rows.length);
+    parts.refs = ord.filter(i => i.type === 'image' && i.refImage);
+    parts.work = choices.filter(c => c.section === 'work' && !c.noPrompt).flatMap(c => picked(c).map(op => (op.p || `${c.label || c.title}: ${op.t}`).replace('{val}', op.val || '')));
+    parts.tasks = choices.filter(c => c.section === 'tasks' && !c.noPrompt).flatMap(c => picked(c).map(op => (op.p || op.t).replace('{val}', op.val || '(Link fehlt – bitte ergänzen)')));
+    ord.filter(i => i.type === 'note' && i.taskNote && (i.text || '').trim() && (!i.ph || i.text.trim() !== i.ph.trim()))
+      .forEach(n => n.text.split('\n').map(l => l.replace(/^[•\-–*]\s*/, '').trim()).filter(l => l && !/:$/.test(l)).forEach(l => parts.tasks.push(l)));
+    return parts;
+  }
+  function partsToLines(P2, { reqTitle = 'Anforderungen:', refText } = {}) {
     const lines = [];
-    lines.push(sum?.intro ?? 'Du bist ein erfahrener Software-Entwickler. Entwickle mit mir Schritt für Schritt die folgende App.');
-    // Notizen: unveränderte Platzhalter überspringen, „Label:“ + Inhalt in eine Zeile
-    const noteLines = notes.map(n => {
-      if (n.ph && n.text.trim() === n.ph.trim()) return null;
-      const ls = n.text.split('\n').map(l => l.trim()).filter(l => l && !/^[•\-–*]\s*$/.test(l) && !/…$/.test(l) || false);
-      if (!ls.length) return null;
-      if (/:$/.test(ls[0])) { if (ls.length === 1) return null; return ls.length === 2 ? `${ls[0]} ${ls[1].replace(/^[•\-–*]\s*/, '')}` : `${ls[0]}\n${ls.slice(1).map(l => '  ' + (l.startsWith('•') ? l : '• ' + l)).join('\n')}`; }
-      const m = ls[0].match(/^(.+?:)\s*(.+)$/); if (m && ls.length === 1) return `${m[1]} ${m[2]}`;
-      return ls.join('\n');
-    }).filter(Boolean);
-    if (noteLines.length) { lines.push(''); noteLines.forEach(l => lines.push(l)); }
-    const sel = choices.filter(c => !c.noPrompt).map(c => [c.label || c.title, (c.options || []).filter(o => o.on).map(o => o.t)]).filter(([, l]) => l.length);
-    if (sel.length) { lines.push('', 'Anforderungen:'); sel.forEach(([t, l]) => lines.push(`- ${t}: ${l.join(', ')}`)); }
-    else lines.push('', '(Wähle in den Auswahllisten Optionen aus – sie erscheinen hier automatisch.)');
-    lines.push('', sum?.outro ?? 'Beginne mit einem lauffähigen Prototyp (MVP) mit den wichtigsten Funktionen. Erkläre kurz die Dateistruktur, halte den Code einfach und frage nach, wenn etwas unklar ist.');
+    if (P2.notes.length) { lines.push(''); P2.notes.forEach(l => lines.push(l)); }
+    if (P2.req.length) { lines.push('', reqTitle); P2.req.forEach(([t, l]) => lines.push(`- ${t}: ${l.join(', ')}`)); }
+    P2.have.forEach(hv => { if (hv.yes.length) lines.push(`- Bereits vorhanden: ${hv.yes.join(', ')}`); if (hv.no.length) lines.push(`- Noch nicht vorhanden: ${hv.no.join(', ')}`); });
+    P2.features.forEach(f => { lines.push('', `${f.title} (nach Priorität):`); f.rows.forEach(r => lines.push(`- [${(r.prio || 'mittel').toUpperCase()}] ${r.t}`)); });
+    if (P2.refs.length) lines.push('', (refText || 'Referenzbilder: Ich lade dir zusätzlich {n} hoch ({list}). Orientiere dich bei Stil, Figuren und Setting daran.').replace('{n}', `${P2.refs.length} Bild${P2.refs.length > 1 ? 'er' : ''}`).replace('{list}', P2.refs.map(r => r.caption || 'Bild').join(', ')));
+    if (P2.work.length) { lines.push('', 'Arbeitsweise:'); P2.work.forEach(w => lines.push(`- ${w}`)); }
+    if (P2.tasks.length) { lines.push('', 'Zusätzliche Aufgaben für dich:'); P2.tasks.forEach((t2, k) => lines.push(`${k + 1}. ${t2}`)); }
+    return lines;
+  }
+  /** Kurzbeschreibung der App aus dem Konzept (für Folge-Prompts) */
+  function appContext() {
+    const main = data.items.filter(i => PROMPT_TYPES.includes(i.type) && !inPhase(i));
+    const noteVal = re => { const n = main.find(i => i.type === 'note' && re.test(i.ph || i.text || '')); if (!n) return ''; const l = noteLine(n); return l ? l.replace(/^[^:]*:\s*/, '').replace(/\n\s*•\s*/g, ', ').trim() : ''; };
+    const choiceVal = lab => { const c = main.find(i => i.type === 'choice' && (i.label === lab || i.title === lab)); return c ? picked(c).map(optText).join(', ') : ''; };
+    const name = noteVal(/^Arbeitstitel/); const idea = noteVal(/^Die Idee/);
+    const facts = [['Typ', choiceVal('App-Typ')], ['Plattform', choiceVal('Plattform / Endgeräte')], ['Technik', choiceVal('Technik')], ['Zielgruppe', choiceVal('Zielgruppe')]].filter(([, v]) => v);
+    const ctx = [idea && `Kurz zur App: ${idea}`, facts.length && facts.map(([k, v]) => `${k}: ${v}`).join(' · ')].filter(Boolean).join('\n');
+    return { name, ctx };
+  }
+  const PHASE_TEXT = {
+    main: {
+      intro: 'Du bist ein erfahrener Software-Entwickler. Entwickle mit mir Schritt für Schritt die folgende App.',
+      outro: 'Beginne mit einem lauffähigen Prototyp (MVP) mit den wichtigsten Funktionen. Erkläre kurz die Dateistruktur, halte den Code einfach und frage nach, wenn etwas unklar ist.',
+    },
+    iteration: {
+      intro: 'Wir entwickeln meine App{name} weiter. Ich habe die aktuelle Version getestet ({round}) und möchte die folgenden Punkte umsetzen.',
+      outro: 'Gehe so vor: Analysiere zuerst die Ursachen der Fehler, ändere dann gezielt nur die betroffenen Stellen (bestehende Funktionen bitte nicht kaputt machen) und gib mir am Ende eine Liste aller Änderungen (Changelog) sowie konkrete Schritte, wie ich die neue Version testen kann.',
+    },
+    testing: {
+      intro: 'Ich möchte meine App{name} mit echten Nutzern testen (User Testing).',
+      outro: 'Erstelle mir einen konkreten Testplan mit Testaufgaben, einen kurzen Fragebogen für die Tester (inkl. Bewertungsskala) und eine Vorlage, mit der ich das Feedback auswerten und als priorisierte To-do-Liste für die nächste Weiterentwicklung nutzen kann.',
+    },
+    golive: {
+      intro: 'Ich möchte meine App{name} jetzt veröffentlichen.',
+      outro: 'Bitte erstelle mir eine Schritt-für-Schritt-Anleitung für die Veröffentlichung: Was ist zu tun, welche Voraussetzungen muss ich erfüllen (Konten, Kosten und Gebühren, rechtliche Anforderungen wie Datenschutzerklärung und Impressum, technische Anforderungen, Store-Richtlinien und Prüfprozess), welche Unterlagen brauche ich (Icon, Screenshots, Texte) und in welcher Reihenfolge gehe ich vor? Weise mich auf typische Stolperfallen hin.',
+    },
+  };
+  function buildPrompt(sum) {
+    const mode = sum?.mode || 'main';
+    const T2 = PHASE_TEXT[mode] || PHASE_TEXT.main;
+    if (mode === 'main') {
+      const P2 = collectParts(data.items.filter(i => PROMPT_TYPES.includes(i.type) && !inPhase(i)));
+      const lines = [];
+      const intro = sum?.intro ?? T2.intro;
+      lines.push(P2.role ? intro.replace(/erfahrener Software-Entwickler|erfahrene[rn]? [^.]*?(?=\. )/, picked(P2.role).map(optText).join(' und ')) : intro);
+      const body = partsToLines(P2);
+      if (!P2.req.length) body.push('', '(Wähle in den Auswahllisten Optionen aus – sie erscheinen hier automatisch.)');
+      lines.push(...body, '', sum?.outro ?? T2.outro);
+      return lines.join('\n');
+    }
+    // Phasen-Prompt: nur Inhalte aus dem eigenen Frame + Kurzbeschreibung der App
+    const frame = sum && frameOf(sum);
+    const items = frame ? data.items.filter(i => i !== sum && PROMPT_TYPES.includes(i.type) && frameOf(i) === frame) : [];
+    const P2 = collectParts(items);
+    const { name, ctx } = appContext();
+    const round = frame?.iterNo ? `Weiterentwicklung #${frame.iterNo}` : 'aktueller Stand';
+    const lines = [(sum.intro ?? T2.intro).replace('{name}', name ? ` „${name}“` : '').replace('{round}', round)];
+    if (ctx) lines.push('', ctx);
+    lines.push(...partsToLines(P2, { reqTitle: mode === 'golive' ? 'Meine Angaben zur Veröffentlichung:' : mode === 'testing' ? 'Rahmen für den Test:' : 'Rahmen dieser Runde:',
+      refText: mode === 'iteration' ? 'Screenshots: Ich lade dir zusätzlich {n} hoch ({list}), die die Probleme zeigen.' : undefined }));
+    if (lines.length <= 3) lines.push('', '(Fülle die Listen und Notizen in diesem Frame aus – sie erscheinen hier automatisch.)');
+    lines.push('', sum.outro ?? T2.outro);
     return lines.join('\n');
   }
+  /** Auswahllisten wachsen automatisch, falls Optionen nicht hineinpassen (Frame wächst mit) */
+  function autoFitChoices(ids) {
+    let changed = false;
+    data.items.filter(i => ['choice', 'features', 'palette', 'devlog'].includes(i.type) && (!ids || ids.includes(i.id))).forEach(it => {
+      const n = nodeOf(it.id); if (!n) return;
+      const need = Math.ceil(n.scrollHeight + 2);
+      if (need > it.h + 1) {
+        const grow = need - it.h; const frame = data.items.find(f => f.type === 'frame' && inside(it, f));
+        it.h = need; place(n, it); changed = true;
+        if (frame) { // alles darunter im selben Frame nach unten schieben und Frame vergrößern
+          data.items.filter(o => o !== it && o.type !== 'frame' && inside(o, frame) && o.y >= it.y + it.h - grow - 1).forEach(o => { o.y += grow; const on = nodeOf(o.id); if (on) place(on, o); });
+          frame.h += grow; const fn = nodeOf(frame.id); if (fn) place(fn, frame);
+        }
+      }
+    });
+    if (changed) { drawLinks(); scheduleSave(); }
+  }
   function refreshSummaries() {
+    data.items.filter(i => i.type === 'devlog').forEach(it => { const n = nodeOf(it.id); if (n) updateVisual(it); });
     data.items.filter(i => i.type === 'summary').forEach(it => { const n = nodeOf(it.id); const b = n && $('.sum-body', n); if (b) b.textContent = buildPrompt(it); });
   }
   async function copyPrompt(it) {
@@ -346,7 +517,8 @@ window.Board = (() => {
     catch { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('Prompt kopiert'); }
   }
   async function editSummary(it) {
-    const v = await openForm({ title: 'KI-Prompt anpassen', values: { title: it.title || 'KI-Prompt', intro: it.intro ?? buildPrompt({}).split('\n')[0], outro: it.outro ?? buildPrompt({}).split('\n').slice(-1)[0] },
+    const T2 = PHASE_TEXT[it.mode || 'main'];
+    const v = await openForm({ title: 'KI-Prompt anpassen', values: { title: it.title || 'KI-Prompt', intro: it.intro ?? T2.intro, outro: it.outro ?? T2.outro },
       extra: '<p class="muted small" style="margin:-6px 0 12px">Dazwischen fügt die App automatisch deine Notizen mit „✦ Prompt“ und alle ausgewählten Optionen ein.</p>',
       fields: [{ key: 'title', label: 'Überschrift' }, { key: 'intro', label: 'Einleitung', type: 'textarea', rows: 3 }, { key: 'outro', label: 'Abschluss / Anweisung', type: 'textarea', rows: 4 }] });
     if (v) { pushUndo(); Object.assign(it, v); rerenderItem(it); }
@@ -437,7 +609,7 @@ window.Board = (() => {
     viewport.style.backgroundSize = `${g}px ${g}px`;
     viewport.style.backgroundPosition = `${v.x}px ${v.y}px`;
     const zEl = $('.wb-zoom', root); if (zEl) zEl.textContent = Math.round(v.z * 100) + '%';
-    updateCtxBar(); $$('.wb-handle', world).forEach(hd => { hd.style.transform = `translate(-50%,-50%) scale(${1 / v.z})`; });
+    updateCtxBar(); if ($('.wb-handle', world)) { clearTimeout(applyView.t); applyView.t = setTimeout(drawHandles, 60); }
   }
 
   function render() {
@@ -446,6 +618,7 @@ window.Board = (() => {
     [...data.items.filter(i => i.type === 'frame'), ...data.items.filter(i => i.type !== 'frame')]
       .forEach(it => world.appendChild(itemEl(it)));
     drawLinks(); applyView(); renderProps(); drawHandles(); updateCtxBar();
+    autoFitChoices(); refreshToc();
     if (P.active) applyPresentState(false);
   }
 
@@ -460,10 +633,13 @@ window.Board = (() => {
     if (it.opacity != null && it.opacity < 1) d.style.opacity = it.opacity;
     if (it.rot) d.style.transform = `rotate(${it.rot}deg)`;
     const tc = it.textColor || (it.type === 'text' ? it.color : null) || '#1F1B2E';
-    const textStyle = `font-size:${it.fs || (it.type === 'text' ? 22 : 16)}px;${it.bold ? 'font-weight:700;' : ''}${it.italic ? 'font-style:italic;' : ''}text-align:${it.align || (it.type === 'text' ? 'left' : 'center')};color:${tc}`;
+    const jc = { top: 'flex-start', middle: 'center', bottom: 'flex-end' }[it.valign || (it.type === 'text' ? 'top' : 'middle')];
+    const padCss = it.pad != null && it.type !== 'note' ? `padding:${it.pad}px;` : '';
+    const textStyle = `font-size:${it.fs || (it.type === 'text' ? 22 : 16)}px;${it.bold ? 'font-weight:700;' : ''}${it.italic ? 'font-style:italic;' : ''}text-align:${it.align || (it.type === 'text' ? 'left' : 'center')};color:${tc};display:flex;flex-direction:column;justify-content:${jc};${padCss}`;
     switch (it.type) {
       case 'note':
         d.style.background = it.color || NOTE_COLORS[0];
+        if (it.pad != null) d.style.padding = it.pad + 'px';
         d.innerHTML = `<div class="wb-text" style="${textStyle}">${esc(it.text || '')}</div>`; break;
       case 'text':
         d.innerHTML = `<div class="wb-text" style="${textStyle}">${esc(it.text || '')}</div>`; break;
@@ -487,10 +663,49 @@ window.Board = (() => {
         const opts = it.options || []; const acc = it.color || '#7C3AED';
         const shown = opts.map((o, i) => ({ ...o, i })).filter(o => !it.onlySelected || o.on);
         d.style.setProperty('--acc', acc);
-        d.innerHTML = `<div class="ch-head"><span>${esc(it.title || 'Auswahl')}</span><em>${it.mode === 'single' ? 'eine Option' : 'mehrere möglich'} · ${opts.filter(o => o.on).length}/${opts.length}</em></div>
-          <div class="ch-opts" style="grid-template-columns:repeat(${it.cols || 1},minmax(0,1fr))">${shown.map(o => `<div class="ch-opt ${o.on ? 'on' : ''}" data-opt="${o.i}"><i class="ch-box ${it.mode === 'single' ? 'radio' : ''}"></i><span>${esc(o.t)}</span></div>`).join('') || '<div class="ch-empty">Noch nichts ausgewählt</div>'}</div>`;
+        const otherOn = !!(it.other && (it.otherText || '').trim());
+        const cnt = opts.filter(o => o.on).length + (otherOn ? 1 : 0);
+        d.innerHTML = `<div class="ch-head"><span>${esc(it.title || 'Auswahl')}</span><em>${it.mode === 'single' ? 'eine Option' : 'mehrere möglich'} · ${cnt}/${opts.length + (it.other ? 1 : 0)}</em></div>
+          <div class="ch-opts" style="grid-template-columns:repeat(${it.cols || 1},minmax(0,1fr))">${shown.map(o => `<div class="ch-opt ${o.on ? 'on' : ''}" data-opt="${o.i}" title="${esc(o.t)}${o.ask ? ' – fragt beim Auswählen nach einer Angabe' : ''}"><i class="ch-box ${it.mode === 'single' ? 'radio' : ''}"></i><span${o.f ? ` style="font-family:'${o.f}',system-ui;font-size:${o.f === 'Press Start 2P' ? 11 : 15}px"` : ''}>${esc(o.t)}${o.on && o.val ? ` <b class="ch-val">${esc(o.val)}</b>` : ''}</span></div>`).join('')}
+          ${it.other && (!it.onlySelected || otherOn) ? `<div class="ch-opt ch-other ${otherOn ? 'on' : ''}" data-act="ch-other" style="grid-column:1/-1"><i class="ch-box ${it.mode === 'single' ? 'radio' : ''}"></i><span>Sonstiges: ${otherOn ? `<b>${esc(it.otherText)}</b>` : '<i class="ch-ph">eigene Angabe eintragen …</i>'}</span></div>` : ''}
+          ${!shown.length && !(it.other && otherOn) ? '<div class="ch-empty">Noch nichts ausgewählt</div>' : ''}</div>`;
         break;
       }
+      case 'features': {
+        const rows = it.rows || []; d.style.setProperty('--acc', it.color || '#7C3AED');
+        const PR = { hoch: 'Hoch', mittel: 'Mittel', niedrig: 'Niedrig' };
+        d.innerHTML = `<div class="ch-head"><span>${esc(it.title || 'Funktionen')}</span><em>${rows.filter(r => !r.done).length} offen · ${rows.filter(r => r.done).length} erledigt</em></div>
+          <div class="fx-rows">${rows.map((r, i) => `<div class="fx-row ${r.done ? 'done' : ''}"><button class="fx-done" data-act="fx-done:${i}" title="${r.done ? 'Wieder öffnen' : 'Als erledigt markieren'}">${r.done ? '✓' : ''}</button><button class="fx-prio p-${r.prio || 'mittel'}" data-act="fx-prio:${i}" title="Priorität ändern">${PR[r.prio || 'mittel']}</button>
+            <span class="fx-text" data-act="fx-edit:${i}" title="Klicken zum Bearbeiten">${esc(r.t)}</span><button class="fx-del" data-act="fx-del:${i}" title="Entfernen">×</button></div>`).join('') || `<div class="ch-empty">${esc(it.hint || 'Noch keine Funktion. Beispiel: „Highscore wird online gespeichert“ oder „Login mit Google“.')}</div>`}</div>
+          <div class="fx-actions"><button class="fx-add" data-act="fx-add">+ Funktion hinzufügen</button>${rows.length > 1 ? '<button class="fx-sort" data-act="fx-sort">Nach Priorität sortieren</button>' : ''}</div>`;
+        break;
+      }
+      case 'palette': {
+        const cols = it.colors || [];
+        d.innerHTML = `<div class="ch-head"><span>${esc(it.title || 'Farbpalette')}</span><em>${it.name ? esc(it.name) + ' · ' : ''}Farbe anklicken zum Ändern</em></div>
+          <div class="pal-row">${cols.map((c, i) => `<div class="pal-sw" data-act="pal-edit:${i}" title="${esc(c.role)} ändern"><i style="background:${c.hex}"></i><b>${esc(c.role)}</b><code>${esc(c.hex.toUpperCase())}</code></div>`).join('')}</div>
+          <div class="fx-actions"><button class="fx-add" data-act="pal-choose">${ic('palette', '#7C3AED', 'ic xs')} Farbpalette wählen</button></div>`;
+        break;
+      }
+      case 'devlog': {
+        const fr = data.items.filter(f => f.type === 'frame');
+        const statusOf = f => { const c = data.items.find(i => i.type === 'choice' && i.statusOf && frameOf(i) === f); return c ? (picked(c)[0]?.t || '–') : '–'; };
+        const iters = fr.filter(f => f.phase === 'iteration').sort((a, b) => (a.iterNo || 0) - (b.iterNo || 0));
+        const testF = fr.find(f => f.phase === 'testing'), liveF = fr.find(f => f.phase === 'golive');
+        const mainSel = data.items.filter(i => i.type === 'choice' && !inPhase(i) && !i.noPrompt && picked(i).length).length;
+        const doneIt = iters.filter(f => /Erledigt/.test(statusOf(f))).length;
+        const step = (label, ok, sub, id) => `<div class="dl-step ${ok ? 'ok' : ''}" ${id ? `data-act="dl-go:${id}"` : ''}><i>${ok ? '✓' : ''}</i><b>${label}</b><small>${sub}</small></div>`;
+        const counts = f => { const lists = data.items.filter(i => i.type === 'features' && frameOf(i) === f); return lists.map(l => { const r = l.rows || []; return r.length ? `<span title="${esc(l.title)}">${/Fehler|Bug|nicht/.test(l.title) ? '🐞' : /Verbesser/.test(l.title) ? '⚙️' : '✨'} ${r.filter(x => x.done).length}/${r.length}</span>` : ''; }).join(''); };
+        const stCls = st => /Erledigt|Live|Abgeschlossen/.test(st) ? 'done' : /Arbeit|Läuft|Getestet|Eingereicht/.test(st) ? 'run' : 'plan';
+        d.innerHTML = `<div class="ch-head"><span>${esc(it.title || 'Entwicklungsverlauf')}</span><em>wird automatisch aktualisiert</em></div>
+          <div class="dl-steps">${step('Konzept', mainSel >= 3, `${mainSel} Listen ausgefüllt`)}${step('Weiterentwicklung', doneIt > 0, `${iters.length} Runde${iters.length === 1 ? '' : 'n'} · ${doneIt} erledigt`, iters[iters.length - 1]?.id)}${step('User Testing', testF && /Abgeschlossen/.test(statusOf(testF)), testF ? statusOf(testF) : 'nicht angelegt', testF?.id)}${step('Go-Live', liveF && /Live/.test(statusOf(liveF)), liveF ? statusOf(liveF) : 'nicht angelegt', liveF?.id)}</div>
+          <div class="dl-rows">${iters.map(f => { const st = statusOf(f); return `<div class="dl-row" data-act="dl-go:${f.id}"><b>#${f.iterNo}</b><span class="dl-date">${f.created ? fmtDate(f.created) : ''}</span><span class="dl-st ${stCls(st)}">${esc(st)}</span><span class="dl-counts">${counts(f) || '<em>noch leer</em>'}</span><span class="dl-go">öffnen →</span></div>`; }).join('') || '<div class="ch-empty">Noch keine Weiterentwicklungs-Runde.</div>'}</div>
+          <div class="fx-actions"><button class="fx-add" data-act="iter-new">+ Neue Weiterentwicklungs-Runde</button></div>`;
+        break;
+      }
+      case 'imgslot':
+        d.innerHTML = `<div class="slot-in" data-act="slot-pick">${ic('image-plus', '#8A85A0', 'ic')}<b>${esc(it.label || 'Bild')}</b><span>Klicken oder Bild hierher ziehen</span></div>`;
+        break;
       case 'summary':
         d.innerHTML = `<div class="sum-head">${ic('sparkles', '#FFFFFF', 'ic sm')}<span>${esc(it.title || 'KI-Prompt')}</span><button class="emb-btn sum-copy" data-copy-prompt title="Prompt in die Zwischenablage kopieren">${ic('copy', '#FFFFFF', 'ic xs')} Kopieren</button></div>
           <pre class="sum-body">${esc(buildPrompt(it))}</pre>`;
@@ -498,7 +713,7 @@ window.Board = (() => {
       case 'draw':
         d.innerHTML = `<svg class="draw" viewBox="0 0 ${it.vw} ${it.vh}" preserveAspectRatio="none"><path d="${smoothPath(it.pts)}" style="fill:none;stroke:${it.color || '#7C3AED'};stroke-width:${it.width || 4};stroke-linecap:round;stroke-linejoin:round;${it.dashed ? 'stroke-dasharray:10 8;' : ''}"/></svg>`; break;
       case 'image':
-        d.innerHTML = `<img src="${it.src}" draggable="false" alt="" style="border-radius:${it.radius ?? 6}px">`; break;
+        d.innerHTML = `<img src="${it.src}" draggable="false" alt="" style="border-radius:${it.radius ?? 6}px">${it.caption ? `<span class="img-cap">${it.refImage ? '📎 ' : ''}${esc(it.caption)}</span>` : ''}`; break;
       case 'embed':
         d.innerHTML = `<div class="emb-head" style="background:${it.headColor || '#7C3AED'}"></div><div class="emb-body"></div>`;
         fillEmbed(d, it); break;
@@ -535,6 +750,7 @@ window.Board = (() => {
       if (animated || it.cover) d.insertAdjacentHTML('beforeend', `<span class="pres-badge" title="Präsentation: Schritt ${it.step || 1}${it.cover ? ' · verdeckt' : ''}">${it.cover ? '?' : '▶'}${it.step || 1}</span>`);
       if (it.presHide) d.classList.add('pres-hide-mark');
     }
+    if (it.goto) { const tf = find(it.goto); if (tf) d.insertAdjacentHTML('beforeend', `<button class="wb-goto ${it.type === 'frame' ? 'in-frame' : ''}" data-goto="${tf.id}" title="Zu „${esc(tf.title || 'Frame')}“ springen">↗ ${esc(tf.title || 'Frame')}</button>`); }
     if (it.promptInclude && (it.type === 'note' || it.type === 'text')) d.insertAdjacentHTML('beforeend', '<span class="prompt-badge" title="Fließt in den KI-Prompt ein">✦ Prompt</span>');
     if (it.locked) { d.classList.add('locked'); d.insertAdjacentHTML('beforeend', `<span class="lock-badge" title="Gesperrt (Strg+L zum Entsperren)">${ic('lock', '#FFFFFF', 'ic xs')}</span>`); }
     d.insertAdjacentHTML('beforeend', '<div class="wb-resize"></div>');
@@ -545,6 +761,7 @@ window.Board = (() => {
   function updateVisual(it) {
     const old = nodeOf(it.id); if (!old) return;
     const n = itemEl(it); old.replaceWith(n);
+    if (['choice', 'features', 'palette', 'devlog'].includes(it.type)) autoFitChoices([it.id]);
     if (P.active) applyPresentState(false);
     drawLinks();
   }
@@ -787,7 +1004,12 @@ window.Board = (() => {
     viewport.addEventListener('dragover', e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); });
     viewport.addEventListener('drop', e => {
       const f = [...(e.dataTransfer.files || [])].find(x => x.type.startsWith('image/'));
-      if (f) { e.preventDefault(); addImageFile(f, toWorld(e.clientX, e.clientY)); }
+      if (f) {
+        e.preventDefault();
+        const slotNode = document.elementFromPoint(e.clientX, e.clientY)?.closest('.wb-imgslot, .wb-image');
+        const slot = slotNode && find(slotNode.dataset.id);
+        addImageFile(f, toWorld(e.clientX, e.clientY), slot && (slot.type === 'imgslot' || slot.refImage) ? slot : null);
+      }
     });
   }
 
@@ -806,7 +1028,9 @@ window.Board = (() => {
     if (P.active) return presClick(e);
     closeMenus();
     const handle = e.target.closest('.wb-handle');
-    if (handle && e.button === 0) { e.stopPropagation(); return startLinkDrag(e, handle.dataset.dir); }
+    if (handle && e.button === 0) { e.stopPropagation(); return handle.classList.contains('rot') ? startRotate(e) : startLinkDrag(e, handle.dataset.dir); }
+    const gotoBtn = e.target.closest('.wb-goto');
+    if (gotoBtn && e.button === 0) { e.stopPropagation(); return jumpToFrame(gotoBtn.dataset.goto); }
     if (e.target.closest('.wb-text[contenteditable="true"]')) return;
     let node = e.target.closest('.wb-item');
     const linkG = e.target.closest('.wb-link');
@@ -878,7 +1102,8 @@ window.Board = (() => {
     const children = [...moving].map(find).filter(Boolean).map(c => ({ c, ox: c.x, oy: c.y, node: nodeOf(c.id) }));
     const orig = { [it.id]: { x: it.x, y: it.y } }; children.forEach(ch => { orig[ch.c.id] = { x: ch.ox, y: ch.oy }; });
     const optEl = it.type === 'choice' ? e.target.closest('[data-opt]') : null;
-    startDrag(e, { mode: 'move', it, node, sx: e.clientX, sy: e.clientY, ox: it.x, oy: it.y, children, orig, ids: new Set(Object.keys(orig)), opt: optEl ? Number(optEl.dataset.opt) : null });
+    const actEl = e.target.closest('[data-act]');
+    startDrag(e, { mode: 'move', it, node, sx: e.clientX, sy: e.clientY, ox: it.x, oy: it.y, children, orig, ids: new Set(Object.keys(orig)), opt: optEl ? Number(optEl.dataset.opt) : null, act: actEl ? actEl.dataset.act : null });
   }
 
   function startDrag(e, state) {
@@ -935,6 +1160,7 @@ window.Board = (() => {
       } else if (drag.mode !== 'pan') {
         undoStack.pop();
         if (drag.opt != null) { const d0 = drag; drag = null; toggleOption(d0.it, d0.opt); }
+        else if (drag.act) { const d0 = drag; drag = null; itemAction(d0.it, d0.act); }
       }
       drag = null;
       $$('.wb-guide', world).forEach(g => g.remove());
@@ -968,6 +1194,7 @@ window.Board = (() => {
     if (it.type === 'icon') return openIconPicker(it);
     if (it.type === 'choice') return editChoice(it);
     if (it.type === 'summary') return editSummary(it);
+    if (['features', 'palette', 'imgslot'].includes(it.type)) return; // werden per Einzelklick bedient
     if (it.type === 'image') { replaceImageTarget = it; return $('.wb-file', root).click(); }
     if (TEXTUAL.includes(it.type)) editText(it.id);
   }
@@ -1076,7 +1303,7 @@ window.Board = (() => {
         <div class="p-row"><button class="pbtn danger" data-p="delete">Löschen</button></div>`;
     } else {
       const type = it.type;
-      const names = { choice: 'Auswahlliste', summary: 'KI-Prompt (automatisch)', draw: 'Zeichnung', note: 'Haftnotiz', text: 'Text', rect: 'Rechteck', ellipse: 'Kreis', diamond: 'Raute', shape: SHAPE_DEFS[it.shape]?.[0] || 'Form', icon: 'Icon', image: 'Bild', frame: 'Frame / Folie',
+      const names = { devlog: 'Entwicklungsverlauf', features: 'Funktionsliste', palette: 'Farbpalette', imgslot: 'Bild-Platzhalter', choice: 'Auswahlliste', summary: 'KI-Prompt (automatisch)', draw: 'Zeichnung', note: 'Haftnotiz', text: 'Text', rect: 'Rechteck', ellipse: 'Kreis', diamond: 'Raute', shape: SHAPE_DEFS[it.shape]?.[0] || 'Form', icon: 'Icon', image: 'Bild', frame: 'Frame / Folie',
         embed: EMBEDS[it.kind]?.label || 'Modul', design: DESIGNS[it.kind]?.label || 'Design', html: 'HTML-Visualisierung' };
       html = `<div class="p-title">${names[type]}</div>`;
       // Inhalt
@@ -1140,7 +1367,9 @@ window.Board = (() => {
       if (TEXTUAL.includes(type)) {
         html += `<div class="p-sub">Text</div><div class="p-row"><button class="pbtn" data-p="fs-">A−</button><span class="fs-val">${it.fs || (type === 'text' ? 22 : 16)}px</span><button class="pbtn" data-p="fs+">A+</button>
           <button class="pbtn ${it.bold ? 'on' : ''}" data-tog="bold"><b>B</b></button><button class="pbtn ${it.italic ? 'on' : ''}" data-tog="italic"><i>I</i></button>
-          <button class="pbtn" data-p="align">${{ left: 'Links', center: 'Mitte', right: 'Rechts' }[it.align || (type === 'text' ? 'left' : 'center')]}</button></div>`;
+          <button class="pbtn" data-p="align">${{ left: 'Links', center: 'Mitte', right: 'Rechts' }[it.align || (type === 'text' ? 'left' : 'center')]}</button></div>
+          <div class="r-row"><span>Vertikal</span><div class="seg sm-seg">${[['top', 'Oben'], ['middle', 'Mitte'], ['bottom', 'Unten']].map(([v, l]) => `<button class="${(it.valign || (type === 'text' ? 'top' : 'middle')) === v ? 'on' : ''}" data-valign="${v}">${l}</button>`).join('')}</div></div>
+          ${rangeRow('Abstand zum Rand', 'pad', it.pad ?? (type === 'note' ? 14 : type === 'text' ? 0 : 14), 0, 80, 1)}`;
         html += `<div class="p-sub">Umwandeln & Verknüpfen</div><div class="p-row">
           <button class="pbtn accent" data-p="to-task">${ic('square-check', '#7C3AED', 'ic xs')} Aufgabe</button>
           <button class="pbtn accent" data-p="to-post">${ic('send', '#7C3AED', 'ic xs')} Post</button>
@@ -1158,6 +1387,8 @@ window.Board = (() => {
           ${it.cover ? `<div class="p-row"><input class="input sm wide" data-txt="coverText" value="${esc(it.coverText || '')}" placeholder="Text auf der Abdeckung (optional)"></div>` : ''}
           <label class="p-check"><input type="checkbox" data-chk="presHide" ${it.presHide ? 'checked' : ''}> In der Präsentation ausblenden</label>`;
       }
+      const frs = framesOrdered().filter(f => f.id !== it.id);
+      if (frs.length) html += `<div class="p-sub">Verlinken</div><div class="r-row"><span>Sprung zu Frame</span><select class="input sm" data-sel="goto"><option value="">– kein Link –</option>${frs.map(f => `<option value="${f.id}" ${it.goto === f.id ? 'selected' : ''}>${esc(f.title || 'Frame')}</option>`).join('')}</select></div>`;
       html += `<div class="p-sub">Anordnen</div><div class="p-row"><button class="pbtn" data-p="front">Nach vorn</button><button class="pbtn" data-p="back">Nach hinten</button><button class="pbtn" data-p="dup">Duplizieren</button></div>
         <div class="p-row"><button class="pbtn danger" data-p="delete">Löschen</button></div>`;
     }
@@ -1217,7 +1448,7 @@ window.Board = (() => {
         render(); return scheduleSave();
       }
       commitSnap();
-      if (t.dataset.sel) setProp(o, t.dataset.sel, t.value);
+      if (t.dataset.sel) { setProp(o, t.dataset.sel, t.value); if (t.dataset.sel === 'goto' && !t.value) delete o.goto; }
       if (t.dataset.num) setProp(o, t.dataset.num, t.value === '' ? null : Number(t.value));
       if (t.dataset.chk) setProp(o, t.dataset.chk, t.checked);
       if (t.dataset.chkinv) { setProp(o, t.dataset.chkinv, !t.checked); setTimeout(refreshSummaries, 0); }
@@ -1240,6 +1471,7 @@ window.Board = (() => {
     if (b.dataset.m) return multiAction(b.dataset.m);
     const o = current(); if (!o) return;
     const d = b.dataset;
+    if (d.valign) { pushUndo(); o.valign = d.valign; return rerenderItem(o); }
     if (d.chmode) { pushUndo(); o.mode = d.chmode; if (o.mode === 'single') { let seen = false; o.options.forEach(x => { if (x.on && seen) x.on = false; if (x.on) seen = true; }); } rerenderItem(o); return refreshSummaries(); }
     if (d.chcols) { pushUndo(); o.cols = Number(d.chcols); o.h = choiceHeight(o); return rerenderItem(o); }
     if (d.corner) { pushUndo(); o.corners = { ...(o.corners || {}) }; o.corners[d.corner] = o.corners[d.corner] === false; if ((o.radius ?? 8) === 0) o.radius = 16; liveUpdate(o); renderProps(); return scheduleSave(); }
@@ -1766,6 +1998,7 @@ window.Board = (() => {
     else if (P.si > 0) { P.si--; P.step = P.slides[P.si].steps.length; P.extra = new Set(); applyPresentState(false); fly(true); }
   }
   function presClick(e) {
+    const g = e.target.closest('.wb-goto'); if (g) return jumpToFrame(g.dataset.goto);
     if (e.target.closest('.emb-body, iframe, .emb-btn, button, input, select, a')) return; // interaktive Elemente bedienbar lassen
     const coverNode = e.target.closest('.p-cover');
     if (coverNode) { // gezielt aufdecken
@@ -1981,7 +2214,11 @@ window.Board = (() => {
         cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
         const src = cv.toDataURL(file.type === 'image/png' ? 'image/png' : 'image/jpeg', 0.85);
         const w = Math.min(380, cv.width); const hh = Math.round(w * cv.height / cv.width);
-        if (replaceItem) { pushUndo(); replaceItem.src = src; replaceItem.h = Math.round(replaceItem.w * cv.height / cv.width); return rerenderItem(replaceItem); }
+        if (replaceItem) {
+          pushUndo();
+          if (replaceItem.type === 'imgslot') { replaceItem.type = 'image'; replaceItem.caption = replaceItem.label; replaceItem.refImage = true; delete replaceItem.label; toast('Bild hinterlegt – denk daran, es später auch im KI-Tool hochzuladen'); }
+          replaceItem.src = src; replaceItem.h = Math.round(replaceItem.w * cv.height / cv.width); rerenderItem(replaceItem); return refreshSummaries();
+        }
         addItem({ type: 'image', src, w, h: hh }, pos);
       };
       img.src = reader.result;
@@ -2053,7 +2290,8 @@ window.Board = (() => {
   function updateCtxBar() {
     const bar = $('.wb-ctx', root); if (!bar) return;
     const items = selItems();
-    if (!items.length || P.active || drag || tool !== 'select') { bar.classList.add('hidden'); return; }
+    const interactive = items.length === 1 && ['choice', 'features', 'palette', 'imgslot', 'summary', 'devlog'].includes(items[0].type); // dort würde die Leiste darüberliegende Listen verdecken
+    if (!items.length || P.active || drag || tool !== 'select' || interactive) { bar.classList.add('hidden'); return; }
     const one = items.length === 1 ? items[0] : null;
     const key = items.map(i => i.id + (i.locked ? 'L' : '') + i.type).join(',');
     if (bar.dataset.key !== key) { bar.dataset.key = key; bar.innerHTML = ctxBarHTML(items, one); }
@@ -2081,6 +2319,7 @@ window.Board = (() => {
         <label class="sw custom cb-custom" title="Eigene Farbe"><input type="color" data-cbc value="#7C3AED"></label><i class="cb-sep"></i>` : ''}
       ${textual ? `<button class="cb" data-cb="fs-" title="Schrift kleiner">A−</button><button class="cb" data-cb="fs+" title="Schrift größer">A+</button><button class="cb ${one.bold ? 'on' : ''}" data-cb="bold" title="Fett"><b>B</b></button><i class="cb-sep"></i>` : ''}
       ${items.length > 1 ? `<button class="cb" data-cb="group" title="Gruppieren (Strg+G)">${ic('group', '#4B4563', 'ic sm')}</button><button class="cb" data-cb="dist-h" title="Horizontal gleich verteilen">${ic('align-horizontal-space-between', '#4B4563', 'ic sm')}</button><button class="cb" data-cb="dist-v" title="Vertikal gleich verteilen">${ic('align-vertical-space-between', '#4B4563', 'ic sm')}</button><i class="cb-sep"></i>` : ''}
+      ${one && one.type !== 'frame' ? `<button class="cb" data-cb="rot90" title="90° drehen (oder am ⟳-Griff ziehen)">${ic('rotate-cw', '#4B4563', 'ic sm')}</button>` : ''}
       <button class="cb" data-cb="dup" title="Duplizieren (Strg+D)">${ic('copy', '#4B4563', 'ic sm')}</button>
       <button class="cb ${locked ? 'on' : ''}" data-cb="lock" title="${locked ? 'Entsperren' : 'Sperren'} (Strg+L)">${ic(locked ? 'lock' : 'lock-open', '#4B4563', 'ic sm')}</button>
       <button class="cb" data-cb="delete" title="Löschen (Entf)">${ic('trash-2', '#EF4444', 'ic sm')}</button>
@@ -2107,6 +2346,7 @@ window.Board = (() => {
         case 'bold': pushUndo(); one.bold = !one.bold; bar.dataset.key = ''; return rerenderItem(one);
         case 'group': return multiAction('group');
         case 'dist-h': case 'dist-v': return multiAction(b.dataset.cb);
+        case 'rot90': pushUndo(); one.rot = (((one.rot || 0) + 90 + 180) % 360) - 180; rerenderItem(one); return drawHandles();
         case 'dup': return items.length > 1 ? multiAction('dup') : duplicate(one);
         case 'lock': bar.dataset.key = ''; return toggleLock();
         case 'delete': if (items.some(i => i.locked)) return toast('Gesperrte Elemente zuerst entsperren'); return removeSelected(items[0].id);
@@ -2126,11 +2366,17 @@ window.Board = (() => {
     $$('.wb-handle', world).forEach(n => n.remove());
     const it = multi.length <= 1 && selected ? find(selected) : null;
     if (!it || it.type === 'frame' || P.active || tool !== 'select' || drag) return;
-    [['n', it.x + it.w / 2, it.y - 22], ['e', it.x + it.w + 22, it.y + it.h / 2], ['s', it.x + it.w / 2, it.y + it.h + 22], ['w', it.x - 22, it.y + it.h / 2]].forEach(([dir, x, y]) => {
+    if (data.view.z < 0.45) return; // bei starkem Herauszoomen würden die Punkte Nachbarelemente verdecken
+    const o = 22 / data.view.z; // fester Abstand in Bildschirm-Pixeln, unabhängig vom Zoom
+    [['n', it.x + it.w / 2, it.y - o], ['e', it.x + it.w + o, it.y + it.h / 2], ['s', it.x + it.w / 2, it.y + it.h + o], ['w', it.x - o, it.y + it.h / 2]].forEach(([dir, x, y]) => {
       const hd = document.createElement('div'); hd.className = 'wb-handle'; hd.dataset.dir = dir; hd.title = 'Ziehen zum Verbinden · Klicken für neues verbundenes Element';
       hd.style.left = x + 'px'; hd.style.top = y + 'px'; hd.style.transform = `translate(-50%,-50%) scale(${1 / data.view.z})`;
       world.appendChild(hd);
     });
+    if (it.locked || it.type === 'draw' && false) return;
+    const rh = document.createElement('div'); rh.className = 'wb-handle rot'; rh.title = 'Ziehen zum Drehen (Shift = 15°-Schritte)';
+    rh.style.left = (it.x + it.w + o) + 'px'; rh.style.top = (it.y - o) + 'px'; rh.style.transform = `translate(-50%,-50%) scale(${1 / data.view.z})`;
+    world.appendChild(rh);
   }
   function startLinkDrag(e, dir) {
     const src = find(selected); const z = data.view.z;
@@ -2156,6 +2402,89 @@ window.Board = (() => {
       data.items.push(n); data.connectors.push({ id: uid(), from: src.id, to: n.id, color: '#7C3AED' });
       selected = n.id; multi = [n.id]; render(); scheduleSave(); editText(n.id);
     };
+    viewport.addEventListener('pointermove', mv); viewport.addEventListener('pointerup', up);
+  }
+
+  // ---------- Bereiche ein-/ausblenden ------------------------------------
+  function applyUi() {
+    if (!root) return;
+    root.classList.toggle('tools-hidden', !uiPrefs.tools);
+    root.classList.toggle('toc-open', !!uiPrefs.toc);
+    $('[data-b=tools]', root)?.classList.toggle('on', !!uiPrefs.tools);
+    $('[data-b=toc]', root)?.classList.toggle('on', !!uiPrefs.toc);
+    $('[data-b=propsp]', root)?.classList.toggle('on', !!propsOpen);
+    refreshToc();
+  }
+
+  // ---------- Inhaltsverzeichnis ------------------------------------------
+  const framesOrdered = () => data.items.filter(i => i.type === 'frame').map((f, idx) => ({ f, idx }))
+    .sort((a, b) => (a.f.order ?? 1e9) - (b.f.order ?? 1e9) || a.f.y - b.f.y || a.f.x - b.f.x || a.idx - b.idx).map(x => x.f);
+  function refreshToc() {
+    const box = root && $('.wb-toc', root); if (!box || !uiPrefs.toc) return;
+    const frames = framesOrdered(); const q = (box.__q || '').toLowerCase();
+    const heads = data.items.filter(i => i.type === 'text' && (i.fs || 22) >= 28 && (i.text || '').trim());
+    const list = frames.filter(f => !q || (f.title || '').toLowerCase().includes(q));
+    const st = $('.toc-list', box)?.scrollTop || 0;
+    box.innerHTML = `<div class="toc-head"><b>Inhalt</b><span class="muted small">${frames.length} Frames</span><button class="props-close" data-toc-close title="Schließen">×</button></div>
+      <input class="input sm toc-search" placeholder="Frames suchen …" value="${esc(box.__q || '')}">
+      <div class="toc-list">${list.map((f, i) => { const n = data.items.filter(c => c.type !== 'frame' && inside(c, f)).length;
+        return `<div class="toc-item ${multi.includes(f.id) ? 'on' : ''}" data-toc="${f.id}"><span class="toc-n">${frames.indexOf(f) + 1}</span><span class="toc-t">${esc(f.title || 'Frame')}<small>${n} Elemente${f.export ? ` · ${f.export.w}×${f.export.h}` : ''}</small></span>
+          <span class="toc-mv"><button data-toc-up="${f.id}" title="Nach oben (Reihenfolge für Präsentation)">▲</button><button data-toc-down="${f.id}" title="Nach unten">▼</button></span></div>`; }).join('') || '<div class="muted small" style="padding:10px">Noch keine Frames. Lege welche mit F an.</div>'}
+      ${heads.length && !q ? `<div class="toc-sub">Überschriften</div>${heads.map(t2 => `<div class="toc-item head" data-toc-el="${t2.id}"><span class="toc-n">#</span><span class="toc-t">${esc(t2.text.split('\n')[0])}</span></div>`).join('')}` : ''}</div>
+      <div class="toc-foot"><button class="pbtn wide" data-toc-all>Alles anzeigen</button></div>`;
+    $('.toc-list', box).scrollTop = st;
+    const inp = $('.toc-search', box);
+    inp.oninput = () => { box.__q = inp.value; refreshToc(); const i2 = $('.toc-search', box); i2.focus(); i2.setSelectionRange(i2.value.length, i2.value.length); };
+    if (!box.__bound) {
+      box.__bound = true;
+      box.addEventListener('pointerdown', e => e.stopPropagation());
+      box.addEventListener('click', e => {
+        const b = e.target.closest('[data-toc],[data-toc-up],[data-toc-down],[data-toc-close],[data-toc-all],[data-toc-el]'); if (!b) return;
+        const d = b.dataset;
+        if (d.tocClose !== undefined) { uiPrefs.toc = false; saveUi(); return applyUi(); }
+        if (d.tocAll !== undefined) return fit();
+        if (d.tocUp || d.tocDown) {
+          e.stopPropagation(); const fr = framesOrdered(); const id = d.tocUp || d.tocDown; const i = fr.findIndex(f => f.id === id); const j = d.tocUp ? i - 1 : i + 1;
+          if (j < 0 || j >= fr.length) return; pushUndo(); [fr[i], fr[j]] = [fr[j], fr[i]]; fr.forEach((f, k) => { f.order = k + 1; }); scheduleSave(); return refreshToc();
+        }
+        if (d.tocEl) { const it = find(d.tocEl); if (it) { flyTo(it, 120); select(it.id); } return; }
+        if (d.toc) { const f = find(d.toc); flyTo(f, 40); select(f.id); }
+      });
+    }
+  }
+  function flyTo(box, pad = 60) {
+    world.style.transition = 'transform .55s cubic-bezier(.65,0,.25,1)';
+    data.view = viewFor(box, pad, uiPrefs.toc ? 300 : 50); applyView(); scheduleSave();
+    setTimeout(() => { world.style.transition = ''; }, 600);
+  }
+
+  // ---------- Sprung-Links zwischen Frames --------------------------------
+  let backView = null;
+  function jumpToFrame(id) {
+    const f = find(id); if (!f) return toast('Ziel-Frame existiert nicht mehr');
+    if (P.active) { const i = P.slides.findIndex(sl => sl.frame?.id === id); if (i >= 0) { P.si = i; P.step = 0; P.extra = new Set(); applyPresentState(false); fly(true); } return; }
+    backView = { ...data.view }; flyTo(f, 40); select(f.id);
+    $('.wb-back', root)?.remove();
+    const bk = h(`<button class="wb-back">↩ Zurück</button>`); root.appendChild(bk);
+    bk.onclick = () => { world.style.transition = 'transform .5s ease'; data.view = backView; applyView(); setTimeout(() => { world.style.transition = ''; }, 550); bk.remove(); };
+    setTimeout(() => bk.remove(), 12000);
+  }
+
+  // ---------- Drehen per Griff --------------------------------------------
+  function startRotate(e) {
+    const it = find(selected); if (!it || it.locked) return;
+    const node = nodeOf(it.id); const r = node.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2; pushUndo();
+    try { viewport.setPointerCapture(e.pointerId); } catch { /* egal */ }
+    $$('.wb-handle', world).forEach(n => n.remove()); $('.wb-ctx', root).classList.add('hidden');
+    const tip = h('<div class="rot-tip"></div>'); root.appendChild(tip);
+    const mv = ev => {
+      let a = Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180 / Math.PI + 90;
+      a = ((a + 540) % 360) - 180; if (ev.shiftKey) a = Math.round(a / 15) * 15; else if (Math.abs(a % 90) < 4 || Math.abs(a % 90) > 86) a = Math.round(a / 90) * 90;
+      it.rot = Math.round(a); node.style.transform = `rotate(${it.rot}deg)`;
+      const rr = root.getBoundingClientRect(); tip.textContent = it.rot + '°'; tip.style.left = (ev.clientX - rr.left + 14) + 'px'; tip.style.top = (ev.clientY - rr.top + 14) + 'px';
+    };
+    const up = () => { viewport.removeEventListener('pointermove', mv); viewport.removeEventListener('pointerup', up); tip.remove(); drawHandles(); updateCtxBar(); renderProps(); scheduleSave(); };
     viewport.addEventListener('pointermove', mv); viewport.addEventListener('pointerup', up);
   }
 
@@ -2306,7 +2635,10 @@ window.Board = (() => {
   async function applyTemplate(direct) {
     const own = getSetting('boardTemplates', []);
     const t = direct || await choose('Board-Vorlage einfügen', [
-      { value: 'appconcept', label: 'App-Konzept (Vibe Coding)', desc: 'Frames für Idee, Zielgruppe, Endgerät, Funktionen, Design, Tools … + automatischer KI-Prompt', icon: 'smartphone' },
+      { value: 'appconcept', label: 'App-Konzept (Vibe Coding)', desc: 'Frames für Idee, Zielgruppe, Endgerät, Funktionen, Design, UX & UI, Tools … + automatischer KI-Prompt', icon: 'smartphone' },
+      { value: 'iteration', label: 'App-Konzept: neue Weiterentwicklungs-Runde', desc: 'Frame für Fehler, fehlende Funktionen & Verbesserungen mit eigenem Prompt – wird im Verlauf getrackt', icon: 'git-branch-plus' },
+      { value: 'lifecycle', label: 'App-Konzept: Verlauf, Testing & Go-Live nachrüsten', desc: 'Für Konzept-Boards, die vor diesem Update angelegt wurden', icon: 'route' },
+      { value: 'appblock', label: 'App-Konzept: einzelnen Block einfügen …', desc: 'z. B. „UX & UI“, „KI-Anweisungen“ oder „Spezifische Funktionen“ in ein bestehendes Konzept-Board nachrüsten', icon: 'layout-panel-left' },
       ...own.map(x => ({ value: 'own:' + x.id, label: '★ ' + x.name, desc: `Eigene Vorlage · ${x.items.length} Elemente`, icon: 'bookmark' })),
       { value: 'save', label: 'Aktuelles Board als Vorlage speichern …', desc: 'Alles (oder nur die Auswahl) als eigene, wiederverwendbare Vorlage', icon: 'bookmark-plus' },
       ...(own.length ? [{ value: 'manage', label: 'Eigene Vorlagen verwalten', desc: 'Umbenennen oder löschen', icon: 'settings' }] : []),
@@ -2318,6 +2650,13 @@ window.Board = (() => {
       { value: 'funnel', label: 'Content-Funnel', desc: 'Reichweite → Vertrauen → Community → Angebot', icon: 'filter' },
     ]);
     if (!t) return;
+    if (t === 'appblock') {
+      const names = buildAppConcept(null, '__names');
+      const pick = await choose('Welchen Block einfügen?', names.map(n2 => ({ value: n2, label: n2, icon: 'frame' })));
+      if (!pick) return; return applyTemplate('appblock:' + pick);
+    }
+    if (t === 'iteration') return addIteration();
+    if (t === 'lifecycle') return addLifecycle();
     if (t === 'save') return saveBoardTemplate();
     if (t === 'manage') return manageBoardTemplates();
     if (t.startsWith('own:')) { const tp = own.find(x => x.id === t.slice(4)); if (!tp) return toast('Vorlage nicht gefunden'); return insertBoardTemplate(tp); }
@@ -2331,6 +2670,7 @@ window.Board = (() => {
     const design = (kind, x, y, scale = 1, extra = {}) => { const d = DESIGNS[kind]; return add({ type: 'design', kind, data: { ...d.defaults }, c: { ...th }, x, y, w: Math.round(d.w * scale), h: Math.round(d.h * scale), ...extra }); };
 
     if (t === 'appconcept') buildAppConcept(add);
+    if (t.startsWith('appblock:')) buildAppConcept(add, t.slice(9));
     if (t === 'pitch') {
       add({ type: 'frame', x: 0, y: 0, w: 960, h: 540, color: '#FFFFFF', title: 'Folie 1 – Titel', order: 1 });
       design('banner', 100, 150, 1, { anim: 'up', step: 1 });
@@ -2396,84 +2736,239 @@ window.Board = (() => {
   }
 
   // ---------- Vorlage: App-Konzept (Vibe Coding) --------------------------
-  function buildAppConcept(add) {
+  function buildAppConcept(add, onlyBlock) {
     const FW = 620, PAD = 24, GAP = 70, COLS = 3;
     // Bezeichnung im KI-Prompt (null = nicht in den Prompt übernehmen)
     const LABELS = { 'Was wird gebaut?': 'App-Typ', 'Für wen?': 'Zielgruppe', 'Technik-Erfahrung der Nutzer': 'Technik-Erfahrung der Nutzer', 'Läuft auf': 'Plattform / Endgeräte', 'Ausrichtung': 'Bildschirm-Ausrichtung',
-      'Funktionen': 'Funktionen', 'Genre': 'Spiel-Genre', 'Steuerung': 'Steuerung', 'Fortschritt': 'Spielfortschritt', 'Look': 'Design-Stil', 'Speicherung': 'Daten & Backend', 'Tool': null,
+      'Funktionen': 'Allgemeine Funktionen', 'Navigation': 'Navigation', 'Wichtige Screens': 'Screens', 'UX-Prinzipien': 'UX-Anforderungen', 'Feedback & Animation': 'Interaktion & Feedback', 'Genre': 'Spiel-Genre', 'Steuerung': 'Steuerung', 'Fortschritt': 'Spielfortschritt', 'Look': 'Design-Stil', 'Speicherung': 'Daten & Backend', 'Tool': null,
       'Technik (falls gewünscht)': 'Technik', 'Geschäftsmodell': 'Monetarisierung', 'Wo erscheint die App?': 'Veröffentlichung', 'Komplexität': 'Umfang', 'Video-Format': null, 'Kapitel (abhaken beim Dreh)': null };
     const colors = ['#7C3AED', '#059669', '#EA580C', '#6366F1', '#DB2777', '#0284C7'];
-    add({ type: 'text', x: 0, y: -150, w: 1400, h: 64, text: 'App-Konzept · Vibe Coding', fs: 46, bold: true, color: '#1F1B2E' });
-    add({ type: 'note', x: 0, y: -70, w: 1300, h: 50, color: '#F5F3FF', fs: 15, align: 'left',
+    if (!onlyBlock) add({ type: 'text', x: 0, y: -150, w: 1400, h: 64, text: 'App-Konzept · Vibe Coding', fs: 46, bold: true, color: '#1F1B2E' });
+    if (!onlyBlock) add({ type: 'note', x: 0, y: -70, w: 1300, h: 50, color: '#F5F3FF', fs: 15, align: 'left',
       text: 'So geht’s: Optionen einfach anklicken · Doppelklick auf eine Liste = Optionen bearbeiten · Notizen mit „✦ Prompt“ fließen in den KI-Prompt ganz unten ein.' });
+    const F = f => ({ t: f, f });  // Schrift mit Vorschau
+    const T = (t, p, ask) => ({ t, p, ...(ask ? { ask } : {}) });  // Aufgabe für die KI
     const S = [
-      ['1 · App-Idee', [
+      ['App-Idee', [
         { note: 'Die Idee in einem Satz:\nEine App, die …', h: 110, prompt: true, color: '#EDE9FE' },
         { note: 'Welches Problem löst sie? Warum ist sie nützlich oder macht Spaß?', h: 100, prompt: true, color: '#EDE9FE' },
-        { row: [{ note: 'Arbeitstitel / Name:', h: 70, prompt: true, color: '#FFEDD5' }, { note: 'Vorbild / ähnliche Apps:', h: 70, color: '#FFEDD5' }] },
+        { row: [{ note: 'Arbeitstitel / Name:', h: 70, prompt: true, color: '#FFEDD5' }, { note: 'Vorbild / ähnliche Apps:', h: 70, prompt: true, color: '#FFEDD5' }] },
       ]],
-      ['2 · App-Typ', [{ ch: ['Was wird gebaut?', ['Handyspiel (Casual Game)', 'Web-App', 'Native Handy-App (iOS/Android)', 'Progressive Web App (PWA)', 'Desktop-App', 'Browser-Erweiterung', 'KI-App / Chatbot', 'Tool / Utility', 'Landingpage / Website'], { mode: 'single', cols: 2 }] }]],
-      ['3 · Zielgruppe', [
+      ['App-Typ', [{ ch: ['Was wird gebaut?', ['Handyspiel (Casual Game)', 'Web-App', 'Native Handy-App (iOS/Android)', 'Progressive Web App (PWA)', 'Desktop-App', 'Browser-Erweiterung', 'KI-App / Chatbot', 'Tool / Utility', 'Landingpage / Website'], { mode: 'single', cols: 2 }] }]],
+      ['Zielgruppe', [
         { ch: ['Für wen?', ['Kinder', 'Jugendliche', 'Junge Erwachsene', 'Erwachsene', 'Senioren', 'Familien', 'Gamer', 'Studierende', 'Berufstätige', 'Selbstständige', 'Unternehmen (B2B)', 'Content Creator'], { cols: 3 }] },
         { ch: ['Technik-Erfahrung der Nutzer', ['Anfänger', 'Fortgeschritten', 'Profis'], { mode: 'single', cols: 3 }] },
       ]],
-      ['4 · Endgerät & Plattform', [
+      ['Endgerät & Plattform', [
         { ch: ['Läuft auf', ['Smartphone (iOS)', 'Smartphone (Android)', 'Tablet', 'Desktop-Browser', 'Mobiler Browser', 'Installierbar (PWA)', 'Smartwatch', 'Smart-TV'], { cols: 2 }] },
         { ch: ['Ausrichtung', ['Hochformat', 'Querformat', 'Beides'], { mode: 'single', cols: 3 }] },
       ]],
-      ['5 · Kernfunktionen', [{ ch: ['Funktionen', ['Login / Benutzerkonto', 'Profil', 'Feed / Startseite', 'Suche & Filter', 'Chat / Nachrichten', 'Push-Benachrichtigungen', 'Kamera / Fotos', 'Standort & Karten', 'Kalender / Termine', 'Bestenliste / Highscore', 'Offline nutzbar', 'Teilen in Social Media', 'Bezahlfunktion', 'KI-Funktion', 'Datei-Upload', 'Statistiken & Diagramme', 'Mehrsprachig', 'Dark Mode', 'Sound & Musik', 'Einstellungen'], { cols: 2 }] }]],
-      ['6 · Spielmechanik (nur bei Spielen)', [
+      ['Allgemeine Funktionen', [{ ch: ['Funktionen', ['Login / Benutzerkonto', 'Profil', 'Feed / Startseite', 'Suche & Filter', 'Chat / Nachrichten', 'Push-Benachrichtigungen', 'Kamera / Fotos', 'Standort & Karten', 'Kalender / Termine', 'Bestenliste / Highscore', 'Offline nutzbar', 'Teilen in Social Media', 'Bezahlfunktion', 'KI-Funktion', 'Datei-Upload', 'Statistiken & Diagramme', 'Mehrsprachig', 'Dark Mode', 'Sound & Musik', 'Einstellungen'], { cols: 2 }] }]],
+      ['Spezifische technische Funktionen', [
+        { fx: true },
+        { note: 'Tipp: Je konkreter, desto besser – z. B. „Highscore wird online gespeichert und weltweit verglichen“ statt „Highscore“. Hoch = muss in Version 1.', h: 70, color: '#F1F5F9', np: true },
+      ]],
+      ['Spiel: Mechanik', [
         { ch: ['Genre', ['Jump’n’Run', 'Endless Runner', 'Puzzle', 'Quiz', 'Arcade-Klassiker', 'Idle / Clicker', 'Geschicklichkeit', 'Strategie', 'Rätsel / Escape', 'Multiplayer'], { cols: 2 }] },
         { ch: ['Steuerung', ['Tippen', 'Wischen', 'Gedrückt halten', 'Neigen (Sensor)', 'Tastatur', 'Maus'], { cols: 3 }] },
         { ch: ['Fortschritt', ['Level', 'Punkte', 'Leben', 'Power-ups', 'Errungenschaften', 'Tägliche Belohnung'], { cols: 3 }] },
       ]],
-      ['7 · Design & Stil', [
-        { ch: ['Look', ['Minimalistisch', 'Verspielt & bunt', 'Retro / Pixel-Art', 'Modern & clean', 'Dunkel / Neon', 'Glassmorphism', 'Handgezeichnet', 'Business / seriös', 'Cartoon'], { cols: 3 }] },
-        { note: 'Farben & Schrift (z. B. Violett #7C3AED, Mint, Orange · runde Schrift):', h: 80, prompt: true, color: '#D1FAE5' },
+      ['Spiel: Figuren, Welt & Story', [
+        { row: [{ note: 'Hauptfigur (Aussehen, Fähigkeiten, Persönlichkeit):', h: 120, prompt: true, color: '#EDE9FE' }, { note: 'Gegner / Nebenfiguren:', h: 120, prompt: true, color: '#EDE9FE' }] },
+        { row: [{ note: 'Setting / Spielwelt (Ort, Zeit, Atmosphäre):', h: 120, prompt: true, color: '#D1FAE5' }, { note: 'Story & Ziel des Spiels:', h: 120, prompt: true, color: '#D1FAE5' }] },
+        { slots: ['Hauptfigur', 'Gegner', 'Setting / Hintergrund'], h: 150 },
+        { note: '📎 Hinweis: Bilder hier per Klick oder Drag & Drop hinterlegen. Der Prompt enthält nur Text – lade die Bilder im KI-Tool (z. B. Claude, Cursor) zusätzlich hoch, etwa per Drag & Drop in den Chat.', h: 80, color: '#FFEDD5', np: true },
       ]],
-      ['8 · Daten & Backend', [{ ch: ['Speicherung', ['Keine Daten nötig', 'Lokal im Gerät (LocalStorage)', 'Datenbank (z. B. Supabase, Firebase)', 'Benutzerkonten & Login', 'Echtzeit-Synchronisation', 'Datei- / Bildspeicher', 'Externe APIs (Wetter, Karten …)', 'KI-API (z. B. Claude)'], { cols: 1 }] }]],
-      ['9 · Vibe-Coding-Tool & Technik', [
+      ['Design: Stil, Farben & Schrift', [
+        { ch: ['Look', ['Minimalistisch', 'Verspielt & bunt', 'Retro / Pixel-Art', 'Modern & clean', 'Dunkel / Neon', 'Glassmorphism', 'Handgezeichnet', 'Business / seriös', 'Cartoon'], { cols: 3 }] },
+        { pal: true },
+        { ch: ['Schrift für Überschriften', [F('Poppins'), F('Montserrat'), F('Inter'), F('Nunito'), F('Fredoka'), F('Bebas Neue'), F('Playfair Display'), F('Space Grotesk'), F('Press Start 2P')], { mode: 'single', cols: 3, label: 'Schriftart Überschriften' }] },
+        { ch: ['Schrift für Fließtext', [F('Inter'), F('Roboto'), F('Open Sans'), F('Nunito'), F('Lato'), F('Merriweather'), F('Quicksand'), F('Source Sans 3'), F('System-Schrift')], { mode: 'single', cols: 3, label: 'Schriftart Fließtext' }] },
+        { slots: ['Moodboard / Inspiration 1', 'Moodboard / Inspiration 2'], h: 130 },
+      ]],
+      ['UX & UI', [
+        { ch: ['Navigation', ['Tab-Leiste unten', 'Seitenmenü (Hamburger)', 'Obere Tabs', 'Wischen zwischen Seiten', 'Eine Seite zum Scrollen', 'Schritt-für-Schritt (Wizard)', 'Startmenü (bei Spielen)'], { cols: 2 }] },
+        { ch: ['Wichtige Screens', ['Splash / Ladebildschirm', 'Onboarding / Tutorial', 'Login & Registrierung', 'Startseite / Dashboard', 'Liste / Übersicht', 'Detailansicht', 'Suche', 'Profil', 'Einstellungen', 'Leerer Zustand („Noch nichts da“)', 'Spielbildschirm', 'Pause-Menü', 'Game Over / Ergebnis', 'Bestenliste', 'Shop'], { cols: 2 }] },
+        { ch: ['UX-Prinzipien', ['Einhand-Bedienung (Daumenzone)', 'Große Touch-Flächen (min. 44 px)', 'Gut lesbar (Kontrast & Schriftgröße)', 'Barrierefrei (Screenreader, Farbenblind)', 'Max. 3 Klicks zum Ziel', 'Klare Fehlermeldungen', 'Rückgängig-Funktion', 'Ladezustände (Skeleton / Spinner)', 'Funktioniert ohne Erklärung'], { cols: 1 }] },
+        { ch: ['Feedback & Animation', ['Micro-Animationen bei Klicks', 'Sanfte Seitenübergänge', 'Vibration (haptisches Feedback)', 'Sound-Effekte', 'Belohnung (Konfetti, Sterne)', 'Fortschrittsanzeige', 'Toast-Hinweise'], { cols: 2 }] },
+        { note: 'User Flow (Hauptweg des Nutzers):\nApp öffnen → … → Ziel erreicht', h: 90, prompt: true, color: '#E0F2FE' },
+        { note: 'Wireframe-Skizze: Mit dem Stift (Taste B) oder Formen die wichtigsten Screens grob aufzeichnen.', h: 70, color: '#F1F5F9', np: true },
+      ]],
+      ['Daten & Backend', [{ ch: ['Speicherung', ['Keine Daten nötig', 'Lokal im Gerät (LocalStorage)', 'Datenbank (z. B. Supabase, Firebase)', 'Benutzerkonten & Login', 'Echtzeit-Synchronisation', 'Datei- / Bildspeicher', 'Externe APIs (Wetter, Karten …)', 'KI-API (z. B. Claude)'], { cols: 1 }] }]],
+      ['Vibe-Coding-Tool & Technik', [
         { ch: ['Tool', ['Claude', 'Claude Code', 'Cursor', 'Lovable', 'Bolt', 'Replit', 'v0', 'GitHub Copilot'], { cols: 2 }] },
         { ch: ['Technik (falls gewünscht)', ['Einfach: HTML, CSS & JavaScript', 'React', 'Next.js', 'React Native / Expo', 'Flutter', 'Python', 'Phaser (2D-Spiele)', 'Three.js (3D)', 'Tailwind CSS', 'Egal – die KI soll entscheiden'], { cols: 2 }] },
       ]],
-      ['10 · Monetarisierung', [{ ch: ['Geschäftsmodell', ['Kostenlos', 'Werbung', 'In-App-Käufe', 'Abo', 'Einmalkauf', 'Spenden', 'Nur Demo fürs Video'], { cols: 2 }] }]],
-      ['11 · Veröffentlichung', [{ ch: ['Wo erscheint die App?', ['Apple App Store', 'Google Play Store', 'Eigene Website', 'GitHub Pages', 'Vercel / Netlify', 'itch.io (Spiele)', 'Nur lokal / Demo'], { cols: 2 }] }]],
-      ['12 · Umfang & Video', [
+      ['Monetarisierung', [{ ch: ['Geschäftsmodell', ['Kostenlos', 'Werbung', 'In-App-Käufe', 'Abo', 'Einmalkauf', 'Spenden', 'Nur Demo fürs Video'], { cols: 2 }] }]],
+      ['Veröffentlichung', [{ ch: ['Wo erscheint die App?', ['Apple App Store', 'Google Play Store', 'Eigene Website', 'GitHub Pages', 'Vercel / Netlify', 'itch.io (Spiele)', 'Nur lokal / Demo'], { cols: 2 }] }]],
+      ['Umfang & Video', [
         { ch: ['Komplexität', ['Mini (unter 1 Stunde)', 'Klein (1 Tag)', 'Mittel (Wochenende)', 'Groß (mehrere Wochen)'], { mode: 'single', cols: 2 }] },
         { ch: ['Video-Format', ['YouTube Short', 'Tutorial (10–20 Min.)', 'Langes Projekt-Video', 'Mehrteilige Serie', 'Livestream'], { cols: 2 }] },
       ]],
-      ['13 · MVP-Plan', [
-        { row: [{ note: 'MUSS (Version 1):\n• \n• \n• ', h: 190, prompt: true, color: '#D1FAE5', align: 'left' }, { note: 'SOLL:\n• \n• ', h: 190, color: '#FEF9C3', align: 'left' }, { note: 'KANN später:\n• \n• ', h: 190, color: '#FCE7F3', align: 'left' }] },
+      ['MVP-Plan', [
+        { row: [{ note: 'MUSS (Version 1):\n• \n• \n• ', h: 190, prompt: true, color: '#D1FAE5', align: 'left' }, { note: 'SOLL:\n• \n• ', h: 190, prompt: true, color: '#FEF9C3', align: 'left' }, { note: 'KANN später:\n• \n• ', h: 190, color: '#FCE7F3', align: 'left' }] },
       ]],
-      ['14 · Video-Ablauf', [
+      ['Video-Ablauf', [
         { ch: ['Kapitel (abhaken beim Dreh)', ['Hook: fertige App zuerst zeigen', 'Die Idee erklären', 'Konzept auf diesem Board', 'Erster Prompt', 'Erster Prototyp', 'Iterieren & verbessern', 'Fehler & wie die KI sie löst', 'Design-Feinschliff', 'Ergebnis & Live-Test', 'Fazit + Call-to-Action'], { cols: 1 }] },
         { note: 'Hook-Idee für den Einstieg:', h: 80, color: '#FFEDD5' },
+      ]],
+      ['KI-Anweisungen (Gespräch strukturieren)', [
+        { ch: ['Rolle der KI', ['erfahrener Software-Entwickler', 'geduldiger Mentor für Einsteiger', 'erfahrener Game-Developer', 'erfahrener UX/UI-Designer', 'erfahrener Produktmanager', 'Senior-Software-Architekt'], { mode: 'single', cols: 2, section: 'role' }] },
+        { ch: ['Arbeitsweise', [
+          T('Stell mir zuerst Rückfragen', 'Stelle mir zuerst alle wichtigen Rückfragen, bevor du mit dem Code beginnst.'),
+          T('In kleinen Schritten mit Feedback', 'Arbeite in kleinen Schritten und warte nach jedem Schritt auf mein Feedback.'),
+          T('Einsteigerfreundlich erklären (fürs Video)', 'Erkläre jeden Schritt einsteigerfreundlich und in einfachen Worten – ich zeige den Prozess in einem YouTube-Video.'),
+          T('Erst Plan, dann Code', 'Erstelle zuerst einen kurzen Plan (Struktur, Screens, Komponenten), bevor du Code schreibst.'),
+          T('Vollständige Dateien statt Ausschnitte', 'Gib immer vollständige, lauffähige Dateien aus statt einzelner Code-Ausschnitte.'),
+          T('Kurz & knapp antworten', 'Antworte kurz und knapp, ohne lange Erklärungen.'),
+          T('Antworten auf Deutsch', 'Antworte auf Deutsch.'),
+          T('Code-Kommentare auf Deutsch', 'Kommentiere den Code auf Deutsch.'),
+        ], { cols: 1, section: 'work', other: true }] },
+        { ch: ['Zusätzliche Aufgaben', [
+          T('Benchmark-Analyse ähnlicher Apps', 'Führe eine Benchmark-Analyse ähnlicher Apps durch: Was machen sie gut, was fehlt ihnen?'),
+          T('Ergänzende Funktionen vorschlagen', 'Schlage Funktionen vor, um die die App sinnvoll ergänzt werden könnte, und begründe sie kurz.'),
+          T('Wettbewerbsfähigkeit einschätzen', 'Schätze ehrlich ein, ob meine App wettbewerbsfähig ist und wie sie sich abheben kann.'),
+          T('Klickbaren Prototyp erstellen', 'Erstelle zuerst einen klickbaren Prototyp, damit ich Ablauf und Design testen kann.'),
+          T('Schritt-für-Schritt-Testanleitung', 'Erstelle eine Schritt-für-Schritt-Anleitung, wie ich die App testen kann (inkl. Testfälle).'),
+          T('Code in mein Git-Repository pushen', 'Pushe den Code in mein Git-Repository: {val}', 'Link zum Git-Repository (z. B. https://github.com/name/repo)'),
+          T('README & Dokumentation schreiben', 'Schreibe eine README mit Installations- und Startanleitung.'),
+          T('Deployment-Anleitung', 'Erkläre, wie ich die App kostenlos online stelle (Deployment), Schritt für Schritt.'),
+          T('Datenschutz (DSGVO) prüfen', 'Prüfe, welche Datenschutz-Punkte (DSGVO) ich beachten muss.'),
+          T('Barrierefreiheit prüfen', 'Prüfe die App auf Barrierefreiheit und schlage Verbesserungen vor.'),
+          T('Automatische Tests schreiben', 'Schreibe automatische Tests für die wichtigsten Funktionen.'),
+          T('Performance optimieren', 'Optimiere die App auf Ladezeit und Performance.'),
+          T('App-Store-Texte schreiben', 'Schreibe App-Store-Texte: Name, Untertitel, Beschreibung und Keywords.'),
+          T('Launch- & Marketing-Ideen', 'Gib mir Ideen für Launch und Marketing, besonders für Social Media.'),
+          T('Ideen für Thumbnail & Videotitel', 'Schlage 5 YouTube-Videotitel und Thumbnail-Ideen für das Video über die Entwicklung vor.'),
+        ], { cols: 1, section: 'tasks', other: true }] },
+        { note: 'Weitere Anweisungen an die KI (eine pro Zeile):\n• ', h: 110, color: '#EDE9FE', align: 'left', task: true },
       ]],
     ];
     let col = 0, rowY = 0, rowH = 0, n = 0;
     const W = FW - PAD * 2;
+    if (onlyBlock === '__names') return S.map(e => e[0]);
+    // Nummern automatisch vergeben, damit neue Blöcke einfach ergänzt werden können
+    S.forEach((e, i) => { e[0] = `${i + 1} · ${e[0].replace(/^\d+ · /, '')}`; });
+    if (onlyBlock) { // nur einen einzelnen Block einfügen (für bestehende Boards)
+      const e = S.find(x => x[0].replace(/^\d+ · /, '') === onlyBlock); if (!e) return;
+      S.length = 0; S.push([e[0].replace(/^\d+ · /, ''), e[1]]);
+    }
     S.forEach(([title, blocks]) => {
       const color = colors[n % colors.length]; n++;
       const fx = col * (FW + GAP), fy = rowY;
-      const kids = []; let cy = PAD + 4;
-      blocks.forEach(b => {
-        if (b.ch) { const [t, o, opt] = b.ch; const c = makeChoice(t, o, { ...opt, color, w: W }); const lab = LABELS[t]; if (lab === null) c.noPrompt = true; else if (lab) c.label = lab; kids.push({ ...c, x: fx + PAD, y: fy + cy }); cy += c.h + 18; }
-        if (b.note) { kids.push({ type: 'note', x: fx + PAD, y: fy + cy, w: W, h: b.h, color: b.color, text: b.note, ph: b.note, fs: 15, align: b.align || 'left', promptInclude: !!b.prompt }); cy += b.h + 18; }
-        if (b.row) { const cw = (W - (b.row.length - 1) * 14) / b.row.length; const hh = Math.max(...b.row.map(r => r.h));
-          b.row.forEach((r, i) => kids.push({ type: 'note', x: fx + PAD + i * (cw + 14), y: fy + cy, w: Math.round(cw), h: hh, color: r.color, text: r.note, ph: r.note, fs: 14, align: r.align || 'left', promptInclude: !!r.prompt }));
-          cy += hh + 18; }
-      });
-      const fh = cy + PAD - 18 + 8;
+      const { kids, h: fh } = layoutBlocks(blocks, fx, fy, FW, color, LABELS);
       add({ type: 'frame', x: fx, y: fy, w: FW, h: fh, color: '#FFFFFF', title, order: n });
       kids.forEach(k => add(k));
       rowH = Math.max(rowH, fh);
       col++; if (col >= COLS) { col = 0; rowY += rowH + GAP + 30; rowH = 0; }
     });
+    if (onlyBlock) return;
     if (col) rowY += rowH + GAP + 30;
     const SW = COLS * FW + (COLS - 1) * GAP;
-    add({ type: 'frame', x: 0, y: rowY, w: SW, h: 520, color: '#F5F3FF', title: '15 · KI-Prompt (wird automatisch erstellt)', order: n + 1 });
+    add({ type: 'frame', x: 0, y: rowY, w: SW, h: 520, color: '#F5F3FF', title: `${n + 1} · KI-Prompt (wird automatisch erstellt)`, order: n + 1 });
     add({ type: 'summary', x: PAD, y: rowY + PAD + 4, w: SW - PAD * 2, h: 470, title: 'Dein Prompt für das Vibe-Coding-Tool' });
+    // Lebenszyklus nach dem ersten Entwurf
+    rowY += 520 + GAP + 60;
+    add({ type: 'text', x: 0, y: rowY, w: 1600, h: 56, text: 'Nach dem ersten Entwurf: Weiterentwickeln · Testen · Veröffentlichen', fs: 34, bold: true, color: '#1F1B2E' });
+    rowY += 110;
+    const ov = layoutBlocks([{ devlog: true }], 0, rowY, SW, '#7C3AED', LABELS);
+    add({ type: 'frame', x: 0, y: rowY, w: SW, h: ov.h, color: '#F5F3FF', title: `${n + 2} · Entwicklungsverlauf (Übersicht)`, order: 40, phase: 'overview' });
+    ov.kids.forEach(k => add(k));
+    rowY += ov.h + GAP + 30;
+    const it1 = layoutBlocks(iterationBlocks(1), 0, rowY, FW + 120, '#EA580C', LABELS);
+    add({ type: 'frame', x: 0, y: rowY, w: FW + 120, h: it1.h, color: '#FFFFFF', title: 'Weiterentwicklung #1', order: 41, phase: 'iteration', iterNo: 1, created: today() });
+    it1.kids.forEach(k => add(k));
+    rowY += it1.h + GAP + 30;
+    const ts = layoutBlocks(testingBlocks(), 0, rowY, FW + 120, '#0284C7', LABELS);
+    add({ type: 'frame', x: 0, y: rowY, w: FW + 120, h: ts.h, color: '#FFFFFF', title: 'User Testing', order: 90, phase: 'testing' });
+    ts.kids.forEach(k => add(k));
+    const gl = layoutBlocks(goliveBlocks(), FW + 120 + GAP, rowY, FW + 120, '#059669', LABELS);
+    add({ type: 'frame', x: FW + 120 + GAP, y: rowY, w: FW + 120, h: gl.h, color: '#FFFFFF', title: 'Go-Live (Veröffentlichung)', order: 91, phase: 'golive' });
+    gl.kids.forEach(k => add(k));
   }
+
+  /** legt Blöcke untereinander in einem Frame an (relativ zu fx/fy) */
+  function layoutBlocks(blocks, fx, fy, FW, color, LABELS = {}) {
+    const PAD = 24, W = FW - PAD * 2; const kids = []; let cy = PAD + 4;
+    blocks.forEach(b => {
+      if (b.ch) { const [t, o, opt = {}] = b.ch; const c = makeChoice(t, o, { other: !['role'].includes(opt.section) && !opt.status && !/Kapitel|Ausrichtung|Komplexität|Technik-Erfahrung/.test(t), ...opt, color, w: W }); const lab = LABELS[t]; if (lab === null || opt.status) c.noPrompt = true; else if (lab) c.label = lab; if (opt.status) c.statusOf = true; if (opt.haveList) c.haveList = true; kids.push({ ...c, x: fx + PAD, y: fy + cy }); cy += c.h + 18; }
+      if (b.note) { kids.push({ type: 'note', x: fx + PAD, y: fy + cy, w: W, h: b.h, color: b.color, text: b.note, ph: b.note, fs: 15, align: b.align || 'left', promptInclude: !!b.prompt || !!b.task, ...(b.task ? { taskNote: true } : {}) }); cy += b.h + 18; }
+      if (b.fx) { const o = b.fx === true ? {} : b.fx; const it = { type: 'features', title: o.title || 'Spezifische technische Funktionen', hint: o.hint, color: o.color || color, rows: [], x: fx + PAD, y: fy + cy, w: W, h: 150 }; if (o.label) it.label = o.label; kids.push(it); cy += 150 + 18; }
+      if (b.pal) { const [nm, cs] = PALETTES[0]; kids.push({ type: 'palette', title: 'Farbpalette', name: nm, colors: cs.map((hx, k) => ({ role: PAL_ROLES[k], hex: hx })), x: fx + PAD, y: fy + cy, w: W, h: 168 }); cy += 168 + 18; }
+      if (b.slots) { const sw = (W - (b.slots.length - 1) * 14) / b.slots.length; b.slots.forEach((lb, i) => kids.push({ type: 'imgslot', label: lb, x: fx + PAD + i * (sw + 14), y: fy + cy, w: Math.round(sw), h: b.h })); cy += b.h + 18; }
+      if (b.row) { const cw = (W - (b.row.length - 1) * 14) / b.row.length; const hh = Math.max(...b.row.map(r => r.h));
+        b.row.forEach((r, i) => kids.push({ type: 'note', x: fx + PAD + i * (cw + 14), y: fy + cy, w: Math.round(cw), h: hh, color: r.color, text: r.note, ph: r.note, fs: 14, align: r.align || 'left', promptInclude: !!r.prompt }));
+        cy += hh + 18; }
+      if (b.sum) { kids.push({ type: 'summary', mode: b.sum.mode, title: b.sum.title, x: fx + PAD, y: fy + cy, w: W, h: b.sum.h || 380 }); cy += (b.sum.h || 380) + 18; }
+      if (b.devlog) { kids.push({ type: 'devlog', title: 'Entwicklungsverlauf', x: fx + PAD, y: fy + cy, w: W, h: 260 }); cy += 260 + 18; }
+    });
+    return { kids, h: cy + PAD - 18 + 8 };
+  }
+  const STATUS_ITER = ['Geplant', 'In Arbeit', 'Getestet', 'Erledigt'];
+  function iterationBlocks(n) {
+    return [
+      { ch: ['Status dieser Runde', STATUS_ITER, { mode: 'single', cols: 4, status: true, sel: ['Geplant'] }] },
+      { ch: ['Schwerpunkt', ['Fehler beheben', 'Fehlende Funktionen ergänzen', 'Neue Ideen umsetzen', 'Design & UX verbessern', 'Performance / Ladezeit', 'Code aufräumen', 'Tests ergänzen'], { cols: 2, label: 'Schwerpunkt' }] },
+      { fx: { title: 'Funktioniert nicht (Fehler / Bugs)', label: 'Fehler, die behoben werden müssen', color: '#DC2626', hint: 'Was funktioniert nicht? Möglichst genau: Was hast du gemacht, was ist passiert, was hätte passieren sollen?' } },
+      { fx: { title: 'Fehlt noch / neue Funktionen', label: 'Fehlende oder neue Funktionen', color: '#7C3AED', hint: 'Funktionen, die im ersten Entwurf fehlen oder dir beim Testen eingefallen sind.' } },
+      { fx: { title: 'Verbesserungen (Design, UX, Performance)', label: 'Verbesserungen', color: '#0284C7', hint: 'z. B. „Buttons größer machen“, „Ladezeit beim Start verkürzen“.' } },
+      { row: [{ note: 'Was funktioniert schon gut? (bitte nicht verändern):', h: 110, prompt: true, color: '#D1FAE5' }, { note: 'Fehlermeldungen (aus Konsole/Terminal kopieren):', h: 110, prompt: true, color: '#FEE2E2' }] },
+      { slots: ['Screenshot 1', 'Screenshot 2', 'Screenshot 3'], h: 120 },
+      { note: '📎 Screenshots per Klick oder Drag & Drop hinterlegen – und im KI-Tool zusätzlich hochladen, der Prompt enthält nur Text.', h: 60, color: '#FFEDD5' },
+      { sum: { mode: 'iteration', title: `Prompt für Weiterentwicklung #${n}`, h: 380 } },
+    ];
+  }
+  function testingBlocks() {
+    return [
+      { ch: ['Status', ['Geplant', 'Läuft', 'Abgeschlossen'], { mode: 'single', cols: 3, status: true, sel: ['Geplant'] }] },
+      { ch: ['Testmethode', ['Selbsttest', 'Freunde & Familie', 'Personen aus der Zielgruppe', 'Remote-Test per Videocall', 'Beta-Test (TestFlight / Google Play Testing)', 'Umfrage nach dem Test', 'A/B-Test zweier Varianten'], { cols: 2, label: 'Testmethode' }] },
+      { ch: ['Testgeräte', ['iPhone', 'Android-Smartphone', 'Tablet', 'Desktop: Chrome', 'Desktop: Safari', 'Desktop: Firefox', 'Langsames Internet'], { cols: 2, label: 'Testgeräte' }] },
+      { row: [{ note: 'Testpersonen (Anzahl, wer):', h: 90, prompt: true, color: '#E0F2FE' }, { note: 'Was soll der Test herausfinden?', h: 90, prompt: true, color: '#E0F2FE' }] },
+      { fx: { title: 'Testaufgaben für die Tester', label: 'Testaufgaben', color: '#0284C7', hint: 'z. B. „Registriere dich und starte das erste Level“.' } },
+      { note: 'Feedback & Beobachtungen der Tester (hier eintragen – die KI wertet es aus):', h: 130, prompt: true, color: '#FEF9C3' },
+      { ch: ['Was soll die KI liefern?', [{ t: 'Testplan', p: 'Erstelle einen Testplan mit Ablauf und Zeitbedarf.' }, { t: 'Fragebogen für Tester', p: 'Erstelle einen kurzen Fragebogen (inkl. System Usability Scale).' }, { t: 'Feedback auswerten', p: 'Werte das Feedback oben aus und leite priorisierte To-dos ab.' }, { t: 'Einladungstext für Tester', p: 'Schreibe einen freundlichen Einladungstext für Testpersonen.' }, { t: 'Beta-Test einrichten', p: 'Erkläre Schritt für Schritt, wie ich einen Beta-Test über TestFlight bzw. Google Play einrichte.' }], { cols: 1, section: 'tasks' }] },
+      { sum: { mode: 'testing', title: 'Prompt für das User Testing', h: 340 } },
+    ];
+  }
+  function goliveBlocks() {
+    return [
+      { ch: ['Status', ['Vorbereitung', 'Eingereicht / in Prüfung', 'Live 🎉'], { mode: 'single', cols: 3, status: true, sel: ['Vorbereitung'] }] },
+      { ch: ['Wo veröffentlichen?', ['Google Play Store (Android)', 'Apple App Store (iOS)', 'Web mit eigener Domain', 'GitHub Pages', 'Vercel / Netlify', 'itch.io (Spiele)', 'Microsoft Store', 'Chrome Web Store (Erweiterung)', 'Steam'], { cols: 2, label: 'Veröffentlichen in' }] },
+      { ch: ['Was habe ich schon?', ['Google-Play-Entwicklerkonto', 'Apple Developer Program', 'Eigene Domain', 'Datenschutzerklärung', 'Impressum', 'App-Icon', 'Screenshots für den Store', 'Store-Beschreibung', 'Gewerbe angemeldet'], { cols: 2, haveList: true, noPrompt: false }] },
+      { row: [{ note: 'App-Name & ggf. Paketname (com.name.app):', h: 90, prompt: true, color: '#D1FAE5' }, { note: 'Geplanter Termin / Kosten-Budget:', h: 90, prompt: true, color: '#D1FAE5' }] },
+      { ch: ['Monetarisierung beim Start', ['Kostenlos', 'Werbung', 'In-App-Käufe', 'Abo', 'Einmalkauf'], { cols: 3, label: 'Monetarisierung' }] },
+      { ch: ['Zusätzlich gewünscht', [{ t: 'Checkliste vor dem Launch', p: 'Erstelle eine Checkliste, was vor dem Launch erledigt sein muss.' }, { t: 'Store-Texte & Keywords', p: 'Schreibe Store-Texte (Titel, Kurz- und Langbeschreibung, Keywords).' }, { t: 'Datenschutzerklärung (Entwurf)', p: 'Erstelle einen Entwurf für eine Datenschutzerklärung (Hinweis: rechtlich prüfen lassen).' }, { t: 'Build- & Release-Einstellungen', p: 'Erkläre die nötigen Build- und Release-Einstellungen (Signierung, Versionsnummer, App-Bundle).' }, { t: 'Launch-Plan für Social Media', p: 'Erstelle einen Launch-Plan für Social Media und meinen YouTube-Kanal.' }, { t: 'Kosten-Übersicht', p: 'Liste alle einmaligen und laufenden Kosten auf.' }], { cols: 1, section: 'tasks' }] },
+      { sum: { mode: 'golive', title: 'Prompt für den Go-Live', h: 360 } },
+    ];
+  }
+  /** Verlauf + Testing + Go-Live in ein bestehendes Board einfügen */
+  function addLifecycle() {
+    const b = data.items.length ? bbox(data.items) : { x: 0, y: 0, w: 0, h: 0 };
+    const x0 = b.x, y0 = b.y + b.h + 200, FW = 740, SW = 2000; pushUndo();
+    const mk = (blocks, x, y, w, color, frameProps) => { const lay = layoutBlocks(blocks, x, y, w, color); const f = { id: uid(), type: 'frame', x, y, w, h: lay.h, color: '#FFFFFF', ...frameProps }; data.items.unshift(f); data.items.push(...lay.kids.map(k => ({ id: uid(), ...k }))); return f; };
+    const ov = mk([{ devlog: true }], x0, y0, SW, '#7C3AED', { title: 'Entwicklungsverlauf (Übersicht)', color: '#F5F3FF', order: 40, phase: 'overview' });
+    const it1 = mk(iterationBlocks(1), x0, ov.y + ov.h + 100, FW, '#EA580C', { title: 'Weiterentwicklung #1', order: 41, phase: 'iteration', iterNo: 1, created: today() });
+    const ts = mk(testingBlocks(), x0, it1.y + it1.h + 100, FW, '#0284C7', { title: 'User Testing', order: 90, phase: 'testing' });
+    mk(goliveBlocks(), x0 + FW + 70, ts.y, FW, '#059669', { title: 'Go-Live (Veröffentlichung)', order: 91, phase: 'golive' });
+    render(); scheduleSave(); flyTo(ov, 60); toast('Verlauf, Weiterentwicklung, User Testing und Go-Live eingefügt');
+  }
+  /** neue Weiterentwicklungs-Runde per Klick anlegen */
+  function addIteration() {
+    const iters = data.items.filter(f => f.type === 'frame' && f.phase === 'iteration').sort((a, b) => (a.iterNo || 0) - (b.iterNo || 0));
+    const n = (iters.length ? Math.max(...iters.map(f => f.iterNo || 0)) : 0) + 1;
+    const FW = 740; let x, y;
+    if (iters.length) { const last = iters[iters.length - 1]; x = last.x + last.w + 80; y = last.y; }
+    else { const ov = data.items.find(f => f.type === 'frame' && f.phase === 'overview'); if (ov) { x = ov.x; y = ov.y + ov.h + 100; } else { const b = data.items.length ? bbox(data.items) : { x: 0, y: 0, w: 0, h: 0 }; x = b.x + b.w + 150; y = b.y; } }
+    const lay = layoutBlocks(iterationBlocks(n), x, y, FW, '#EA580C');
+    pushUndo();
+    const frame = { id: uid(), type: 'frame', x, y, w: FW, h: lay.h, color: '#FFFFFF', title: `Weiterentwicklung #${n}`, order: 40 + n, phase: 'iteration', iterNo: n, created: today() };
+    const kids = lay.kids.map(k => ({ id: uid(), ...k }));
+    // die Status-Auswahl der vorherigen Runde auf „Erledigt“ vorschlagen? – bewusst nicht automatisch
+    data.items.unshift(frame); data.items.push(...kids);
+    render(); scheduleSave(); flyTo(frame, 40); select(frame.id);
+    toast(`Weiterentwicklung #${n} angelegt – trage ein, was nicht funktioniert oder fehlt`);
+  }
+
 
   // ---------- Eigene Board-Vorlagen ---------------------------------------
   async function saveBoardTemplate() {
