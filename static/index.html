@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Violet Planner</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><span class="logo"></span><span>Violet Planner</span></div>
+    <nav>
+      <a href="#/dashboard" data-view="dashboard"><img src="https://api.iconify.design/lucide/layout-dashboard.svg?color=%236B6780" alt=""><span>Übersicht</span></a>
+      <a href="#/projects" data-view="projects"><img src="https://api.iconify.design/lucide/folder-kanban.svg?color=%236B6780" alt=""><span>Projekte</span></a>
+      <a href="#/board" data-view="board"><img src="https://api.iconify.design/lucide/presentation.svg?color=%236B6780" alt=""><span>Whiteboard</span></a>
+      <a href="#/okr" data-view="okr"><img src="https://api.iconify.design/lucide/target.svg?color=%236B6780" alt=""><span>Ziele (OKR)</span></a>
+      <a href="#/tasks" data-view="tasks"><img src="https://api.iconify.design/lucide/list-checks.svg?color=%236B6780" alt=""><span>Aufgaben</span></a>
+      <a href="#/calendar" data-view="calendar"><img src="https://api.iconify.design/lucide/calendar-days.svg?color=%236B6780" alt=""><span>Kalender</span></a>
+      <a href="#/content" data-view="content"><img src="https://api.iconify.design/lucide/clapperboard.svg?color=%236B6780" alt=""><span>Content</span></a>
+      <a href="#/video" data-view="video"><img src="https://api.iconify.design/lucide/film.svg?color=%236B6780" alt=""><span>Video-Editor</span></a>
+    </nav>
+    <div class="sidebar-foot">Lokal gespeichert · SQLite</div>
+  </aside>
+  <main id="main"><div class="loading">Lade …</div></main>
+  <div id="modal-root"></div>
+  <div id="toast"></div>
+  <script src="app.js"></script>
+  <script src="ai.js"></script>
+  <script src="posts.js"></script>
+  <script src="projects.js"></script>
+  <script src="designs.js"></script>
+  <script src="htmltool.js"></script>
+  <script src="video.js"></script>
+  <script src="board.js"></script>
+</body>
+</html>
