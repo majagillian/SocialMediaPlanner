@@ -32,7 +32,7 @@ Optionen: `--port 9000`, `--no-browser`, `--db /pfad/zur/datei.db`, `--host 0.0.
 - **Designvorlagen (G):** über 20 Elemente ähnlich wie bei Canva: Kennzahl, Fortschritt, Prozess, Zeitstrahl, Vergleich, Pyramide, Kreislauf, Checkliste, Kreis- und Balkendiagramm, KPI-Reihe, Instagram-Post, Story, Karussell-Slide, Persona, Banner, Zitat, Info-Karte. Dazu 7 Farbthemen, Inhalte per Doppelklick bearbeitbar.
 - **HTML-Visualisierung (Y):** eigener HTML/CSS/JS-Code mit Live-Vorschau und Vorlagen (animierte Diagramme, Zähler, Heatmap, Chart.js). Auf Wunsch erzeugt die KI den Code. Der Code läuft abgeschottet in einer Sandbox.
 - **Frames (F):** Folien in 16:9, 9:16, 1:1 und 4:5 sowie fertige Layouts. Jeder Frame lässt sich als **eigene Vorlage speichern** und in jedem Board wieder einfügen.
-- **Mehrfachauswahl:** Shift+Klick oder Shift+Ziehen. Damit kannst du **gruppieren** (Strg+G), ausrichten, **gleichmäßig horizontal und vertikal verteilen** (automatisch oder mit festem Abstand), Größen angleichen oder alles in einen Frame packen.
+- **Mehrfachauswahl:** Strg/Cmd+Klick oder Strg/Cmd+Ziehen (auch mit Shift). Damit kannst du **gruppieren** (Strg+G), ausrichten, **gleichmäßig horizontal und vertikal verteilen** (automatisch oder mit festem Abstand), Größen angleichen oder alles in einen Frame packen.
 - **Präsentationsmodus (P):** Frames werden nacheinander im Vollbild gezeigt. Jedes Element kann eine Animation bekommen (Einblenden, Von unten/oben/links/rechts, Zoom, Pop, Wischen, Unschärfe, Drehen) und einem Schritt zugeordnet werden. Elemente lassen sich **verdecken** (per Klick oder im Schritt aufdecken) oder **in der Präsentation ausblenden** (z. B. für Sprechernotizen). Steuerung mit Pfeiltasten, Leertaste oder Klick.
 - **Timer & Stoppuhr:** mit Voreinstellungen, Ton am Ende und Rundenzeiten. Läuft auch während der Präsentation (Taste T).
 
@@ -54,9 +54,19 @@ Dazu kommen 12 Beitragsvorlagen, eigene Vorlagen und KI-Texte.
 - **Verbindungspunkte (●):** An einem ausgewählten Element ziehen, um es mit einem anderen zu verbinden. Ein Klick legt direkt ein neues, verbundenes Element an, ideal für Mindmaps.
 - **Hilfslinien** beim Verschieben richten Elemente an Kanten und Mitten anderer Elemente aus. Mit Alt schaltest du sie aus.
 - **Kopieren, Ausschneiden, Einfügen** (Strg+C/X/V), auch zwischen Boards. Eingefügter Text aus anderen Programmen wird zu Notizen, eingefügte Bilder landen direkt auf dem Board.
+- **Mehrfachauswahl mit Strg (Mac: Cmd):** Strg+Klick fügt Elemente zur Auswahl hinzu oder entfernt sie, Strg+Ziehen auf leerer Fläche zieht einen Auswahlrahmen (Shift funktioniert ebenso).
+- **Rechtecke:** Eckenradius bis 200 px. Per Klick auf die Ecken der kleinen Vorschau wählst du, welche Ecken gerundet werden. Dazu gibt es Vorgaben (Alle, Keine, Oben, Unten, Links, Rechts, Diagonal). Bei mehreren ausgewählten Rechtecken lässt sich das für alle gleichzeitig einstellen.
 - **Pfeiltasten** verschieben (mit Shift in 10er-Schritten). **Strg+L** sperrt Elemente. **Rechtsklick** öffnet ein Kontextmenü.
 - **Stift (B):** freihand zeichnen mit Farbe und Strichstärke.
 - **Tastenkürzel-Übersicht:** ? oder das Tastatur-Symbol oben.
+
+## Vorlage „App-Konzept (Vibe Coding)“ (neu)
+Für die Planung von Apps, Handyspielen und Web-Apps, die du mit KI baust (z. B. für YouTube-Videos). Du findest sie unter „Board-Vorlage“ oder beim Anlegen eines neuen Boards („+ Board“ → Vorlage).
+
+- **15 Frames**, einer pro Entwicklungsthema: App-Idee, App-Typ, Zielgruppe, Endgerät & Plattform, Kernfunktionen, Spielmechanik, Design & Stil, Daten & Backend, Vibe-Coding-Tool & Technik, Monetarisierung, Veröffentlichung, Umfang & Video, MVP-Plan, Video-Ablauf und KI-Prompt.
+- **Auswahllisten:** Optionen einfach anklicken. Je nach Liste ist eine Option oder es sind mehrere möglich. Ein Doppelklick bearbeitet Überschrift und Optionen (eine pro Zeile, `[x]` = ausgewählt). Über das Eigenschaften-Panel stellst du Spalten und Farbe ein oder lässt nur das Ausgewählte anzeigen, was sich gut fürs Video eignet. Eigene Auswahllisten legst du mit dem Listen-Werkzeug oder der Taste K an.
+- **KI-Prompt (automatisch):** Er sammelt live alle ausgewählten Optionen und alle Notizen mit „✦ In KI-Prompt übernehmen“. Unausgefüllte Platzhalter werden übersprungen. Mit „Kopieren“ fügst du ihn direkt in Claude, Cursor & Co. ein. Einleitung und Abschluss lassen sich per Doppelklick anpassen.
+- **Anpassen & speichern:** Ändere Frames, Listen und Notizen beliebig, dann „Board-Vorlage“ → „Aktuelles Board als Vorlage speichern“. Das geht für das ganze Board oder nur die Auswahl, optional mit zurückgesetzten Auswahlen. Eigene Vorlagen stehen danach in jedem Board und beim Anlegen neuer Boards zur Verfügung und lassen sich umbenennen oder löschen.
 
 ## Social-Media-Frames (neu)
 Frame-Werkzeug (F) → Bereich „Social Media“. Alle Formate haben exakte Pixelmaße:
@@ -130,7 +140,7 @@ Eingebettete Karten sind **live**: Du kannst Aufgaben abhaken, Key Results mit +
 **Verknüpfen:** Jede Notiz oder Form kann mit einer Aufgabe, einem Post oder einem Ziel verknüpft werden. Ein orangefarbenes Link-Symbol öffnet den verknüpften Eintrag.
 
 ### Tastenkürzel
-V Auswählen · H Verschieben · N Notiz · T Text · R Rechteck · O Kreis · D Raute · L Verbinden · F Frame · G Designs · I Icons · Y HTML · E Modul einbetten · P Präsentieren ·
+V Auswählen · H Verschieben · K Auswahlliste · N Notiz · T Text · R Rechteck · O Kreis · D Raute · L Verbinden · F Frame · G Designs · I Icons · Y HTML · E Modul einbetten · P Präsentieren ·
 Strg+A Alles auswählen · Strg+G Gruppieren · Strg+Shift+G Gruppierung aufheben ·
 Leertaste + Ziehen = Fläche verschieben · Mausrad = Zoom · 0 = Einpassen · Entf = Löschen · Strg+Z = Rückgängig · Strg+D = Duplizieren ·
 Shift beim Ziehen = am Raster ausrichten · Doppelklick auf leere Fläche = neue Notiz

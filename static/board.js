@@ -49,6 +49,14 @@ window.Board = (() => {
     return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.6 ? '#1F1B2E' : '#FFFFFF';
   }
   const uid = () => Math.random().toString(36).slice(2, 10);
+  /** Mehrfachauswahl-Taste: Strg (Windows/Linux), Cmd (Mac) oder Shift */
+  const addKey = e => e.shiftKey || e.ctrlKey || e.metaKey;
+  const CORNERS = ['tl', 'tr', 'br', 'bl'];
+  const CORNER_PRESETS = { alle: [1, 1, 1, 1], keine: [0, 0, 0, 0], oben: [1, 1, 0, 0], unten: [0, 0, 1, 1], links: [1, 0, 0, 1], rechts: [0, 1, 1, 0], diagonal: [1, 0, 1, 0], gegendiagonal: [0, 1, 0, 1] };
+  function rectRadius(it) {
+    const r = it.radius ?? 8; const c = it.corners || {};
+    return CORNERS.map(k => (c[k] === false ? 0 : r) + 'px').join(' ');
+  }
 
   const EMBEDS = {
     okr:      { label: 'OKR-Ziel', desc: 'Ein Ziel mit Key Results und Fortschritt', icon: 'target', w: 400, h: 330, ref: 'objectives', module: 'okr' },
@@ -137,6 +145,7 @@ window.Board = (() => {
           <button class="tool" data-tool="shapes" title="Formenbibliothek (D)">${ic('shapes', '#4B4563', 'ic')}</button>
           ${toolBtn('connect', 'move-up-right', 'Verbinden (L): erst Start, dann Ziel anklicken – oder an den ● Punkten ziehen')}
           ${toolBtn('pen', 'pen-line', 'Stift – freihand zeichnen (B)')}
+          <button class="tool" data-tool="choice" title="Auswahlliste – Optionen zum Anklicken (K)">${ic('list-checks', '#4B4563', 'ic')}</button>
           ${toolBtn('frame', 'frame', 'Frame / Folie (F) – mit Vorlagen')}
           <i class="sep"></i>
           ${toolBtn('design', 'palette', 'Designvorlagen (G)')}
@@ -177,6 +186,10 @@ window.Board = (() => {
     listeners.add(onData);
 
     render(); setTool('select');
+    try { // Vorlage für ein frisch angelegtes Board anwenden
+      const pend = JSON.parse(localStorage.getItem('vp-board-tpl') || 'null');
+      if (pend && pend.id === board.id) { localStorage.removeItem('vp-board-tpl'); setTimeout(() => applyTemplate(pend.tpl), 50); }
+    } catch { /* egal */ }
     return () => {
       if (P.active) stopPresentation();
       if (saveTimer) saveNow();
@@ -200,6 +213,7 @@ window.Board = (() => {
       if (t === 'html') return addHtml();
       if (t === 'frame') return openFrameTemplates();
       if (t === 'shapes') return toggleShapePicker(b);
+      if (t === 'choice') return addChoice();
       setTool(t);
     });
     $('.wb-file', root).onchange = e => { const f = e.target.files[0]; if (f) addImageFile(f, null, replaceImageTarget); replaceImageTarget = null; e.target.value = ''; };
@@ -215,9 +229,14 @@ window.Board = (() => {
       if (a === 'help') showShortcuts();
       if (a === 'present') startPresentation();
       if (a === 'new') {
-        const v = await openForm({ title: 'Neues Board', fields: [{ key: 'name', label: 'Name', required: true }], submitLabel: 'Anlegen' });
+        const own = getSetting('boardTemplates', []);
+        const v = await openForm({ title: 'Neues Board', submitLabel: 'Anlegen', values: { tpl: '' },
+          fields: [{ key: 'name', label: 'Name', required: true },
+            { key: 'tpl', label: 'Vorlage', type: 'select', options: [['', 'Leeres Board'], ['appconcept', 'App-Konzept (Vibe Coding)'], ...own.map(t => ['own:' + t.id, '★ ' + t.name]), ['strategy', 'Content-Strategie'], ['pitch', 'Präsentation (3 Folien)'], ['brainstorm', 'Ideen-Brainstorm'], ['week', 'Wochenplanung']] },
+            { key: 'project_id', label: 'Projekt (optional)', type: 'select', numeric: true, options: [['', '– keines –'], ...S.projects.map(p => [p.id, p.name])] }] });
         if (!v) return;
-        const nb = await DB.create('boards', { name: v.name, data: JSON.stringify({ items: [], connectors: [], view: { x: 80, y: 60, z: 1 } }) }, true);
+        const nb = await DB.create('boards', { name: v.name, project_id: v.project_id, data: JSON.stringify({ items: [], connectors: [], view: { x: 80, y: 60, z: 1 } }) }, true);
+        if (v.tpl) { try { localStorage.setItem('vp-board-tpl', JSON.stringify({ id: nb.id, tpl: v.tpl })); } catch { /* egal */ } }
         switchBoard(nb.id);
       }
       if (a === 'rename') {
@@ -255,7 +274,89 @@ window.Board = (() => {
     $('.wb-hint', root).textContent = hints[t] || (t.startsWith('shape:') ? `Klicke auf die Fläche, um „${SHAPE_DEFS[t.slice(6)][0]}“ zu setzen` : '');
   }
 
+  // ---------- Auswahllisten & KI-Prompt -----------------------------------
+  function choiceHeight(it) {
+    const n = it.onlySelected ? Math.max(1, (it.options || []).filter(o => o.on).length) : (it.options || []).length;
+    return 52 + Math.ceil(Math.max(1, n) / (it.cols || 1)) * 33 + 10;
+  }
+  function makeChoice(title, options, { mode = 'multi', cols = 1, color = '#7C3AED', w = 560, sel = [] } = {}) {
+    const it = { type: 'choice', title, mode, cols, color, w, options: options.map(t => ({ t, on: sel.includes(t) })) };
+    it.h = choiceHeight(it); return it;
+  }
+  function toggleOption(it, i) {
+    pushUndo();
+    const o = it.options[i]; if (!o) return;
+    if (it.mode === 'single') { const was = o.on; it.options.forEach(x => { x.on = false; }); o.on = !was; } else o.on = !o.on;
+    if (it.onlySelected) it.h = choiceHeight(it);
+    updateVisual(it); refreshSummaries(); renderProps(); scheduleSave();
+  }
+  async function editChoice(it) {
+    const v = await openForm({
+      title: 'Auswahlliste bearbeiten', submitLabel: 'Übernehmen',
+      extra: '<p class="muted small" style="margin:-6px 0 12px">Eine Option pro Zeile. Mit <b>[x]</b> am Zeilenanfang ist sie ausgewählt. Auf dem Board schaltest du Optionen einfach per Klick um.</p>',
+      values: { title: it.title, label: it.label || '', mode: it.mode || 'multi', cols: it.cols || 1, options: (it.options || []).map(o => (o.on ? '[x] ' : '') + o.t).join('\n') },
+      fields: [
+        { key: 'title', label: 'Überschrift', required: true, half: true },
+        { key: 'label', label: 'Bezeichnung im KI-Prompt (optional)', half: true },
+        { key: 'mode', label: 'Auswahl', type: 'select', half: true, options: [['multi', 'Mehrere Optionen'], ['single', 'Nur eine Option']] },
+        { key: 'cols', label: 'Spalten', type: 'select', half: true, numeric: true, options: [[1, '1 Spalte'], [2, '2 Spalten'], [3, '3 Spalten']] },
+        { key: 'options', label: 'Optionen', type: 'textarea', rows: 10 },
+      ],
+    });
+    if (!v) return;
+    pushUndo();
+    it.title = v.title; it.label = v.label || ''; it.mode = v.mode; it.cols = v.cols || 1;
+    it.options = v.options.split('\n').map(l => l.trim()).filter(Boolean).map(l => ({ on: /^\[x\]/i.test(l), t: l.replace(/^\[[ x]?\]\s*/i, '') }));
+    if (it.mode === 'single') { let seen = false; it.options.forEach(o => { if (o.on && seen) o.on = false; if (o.on) seen = true; }); }
+    it.h = Math.max(it.h, choiceHeight(it)); rerenderItem(it); refreshSummaries();
+  }
+  /** Reihenfolge: nach Frames (Folien-Nr./Position), darin von oben nach unten */
+  function orderedByFrames(list) {
+    const frames = data.items.filter(i => i.type === 'frame').sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || a.y - b.y || a.x - b.x);
+    const fi = it => { const cx = it.x + it.w / 2, cy = it.y + it.h / 2; const k = frames.findIndex(f => cx >= f.x && cx <= f.x + f.w && cy >= f.y && cy <= f.y + f.h); return k < 0 ? 1e6 : k; };
+    return [...list].sort((a, b) => fi(a) - fi(b) || a.y - b.y || a.x - b.x);
+  }
+  function buildPrompt(sum) {
+    const choices = orderedByFrames(data.items.filter(i => i.type === 'choice'));
+    const notes = orderedByFrames(data.items.filter(i => (i.type === 'note' || i.type === 'text' || SHAPES.includes(i.type)) && i.promptInclude && (i.text || '').trim()));
+    const lines = [];
+    lines.push(sum?.intro ?? 'Du bist ein erfahrener Software-Entwickler. Entwickle mit mir Schritt für Schritt die folgende App.');
+    // Notizen: unveränderte Platzhalter überspringen, „Label:“ + Inhalt in eine Zeile
+    const noteLines = notes.map(n => {
+      if (n.ph && n.text.trim() === n.ph.trim()) return null;
+      const ls = n.text.split('\n').map(l => l.trim()).filter(l => l && !/^[•\-–*]\s*$/.test(l) && !/…$/.test(l) || false);
+      if (!ls.length) return null;
+      if (/:$/.test(ls[0])) { if (ls.length === 1) return null; return ls.length === 2 ? `${ls[0]} ${ls[1].replace(/^[•\-–*]\s*/, '')}` : `${ls[0]}\n${ls.slice(1).map(l => '  ' + (l.startsWith('•') ? l : '• ' + l)).join('\n')}`; }
+      const m = ls[0].match(/^(.+?:)\s*(.+)$/); if (m && ls.length === 1) return `${m[1]} ${m[2]}`;
+      return ls.join('\n');
+    }).filter(Boolean);
+    if (noteLines.length) { lines.push(''); noteLines.forEach(l => lines.push(l)); }
+    const sel = choices.filter(c => !c.noPrompt).map(c => [c.label || c.title, (c.options || []).filter(o => o.on).map(o => o.t)]).filter(([, l]) => l.length);
+    if (sel.length) { lines.push('', 'Anforderungen:'); sel.forEach(([t, l]) => lines.push(`- ${t}: ${l.join(', ')}`)); }
+    else lines.push('', '(Wähle in den Auswahllisten Optionen aus – sie erscheinen hier automatisch.)');
+    lines.push('', sum?.outro ?? 'Beginne mit einem lauffähigen Prototyp (MVP) mit den wichtigsten Funktionen. Erkläre kurz die Dateistruktur, halte den Code einfach und frage nach, wenn etwas unklar ist.');
+    return lines.join('\n');
+  }
+  function refreshSummaries() {
+    data.items.filter(i => i.type === 'summary').forEach(it => { const n = nodeOf(it.id); const b = n && $('.sum-body', n); if (b) b.textContent = buildPrompt(it); });
+  }
+  async function copyPrompt(it) {
+    const txt = buildPrompt(it);
+    try { await navigator.clipboard.writeText(txt); toast('Prompt kopiert – jetzt in dein Vibe-Coding-Tool einfügen'); }
+    catch { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('Prompt kopiert'); }
+  }
+  async function editSummary(it) {
+    const v = await openForm({ title: 'KI-Prompt anpassen', values: { title: it.title || 'KI-Prompt', intro: it.intro ?? buildPrompt({}).split('\n')[0], outro: it.outro ?? buildPrompt({}).split('\n').slice(-1)[0] },
+      extra: '<p class="muted small" style="margin:-6px 0 12px">Dazwischen fügt die App automatisch deine Notizen mit „✦ Prompt“ und alle ausgewählten Optionen ein.</p>',
+      fields: [{ key: 'title', label: 'Überschrift' }, { key: 'intro', label: 'Einleitung', type: 'textarea', rows: 3 }, { key: 'outro', label: 'Abschluss / Anweisung', type: 'textarea', rows: 4 }] });
+    if (v) { pushUndo(); Object.assign(it, v); rerenderItem(it); }
+  }
+
   // ---------- Stift (freihand) --------------------------------------------
+  function addChoice() {
+    const it = makeChoice('Auswahl', ['Option 1', 'Option 2', 'Option 3', 'Option 4'], { w: 320 });
+    addItem(it); setTimeout(() => editChoice(find(selected)), 50);
+  }
   function smoothPath(pts) {
     if (!pts?.length) return '';
     if (pts.length < 3) return `M${pts[0][0]},${pts[0][1]} ` + pts.slice(1).map(p => `L${p[0]},${p[1]}`).join(' ');
@@ -376,12 +477,24 @@ window.Board = (() => {
           d.innerHTML = `<svg class="shape" viewBox="0 0 100 100" preserveAspectRatio="none" style="overflow:visible"><g style="fill:${fill};stroke:${sw ? c : 'none'};stroke-width:${sw};stroke-linejoin:round;${it.dashed ? 'stroke-dasharray:8 6;' : ''}">${inner}</g></svg>`;
         } else {
           d.innerHTML = `<div class="shape-box" style="background:${fill};border:${sw}px ${it.dashed ? 'dashed' : 'solid'} ${sw ? c : 'transparent'};
-            border-radius:${it.type === 'ellipse' ? '50%' : (it.radius ?? 8) + 'px'}"></div>`;
+            border-radius:${it.type === 'ellipse' ? '50%' : rectRadius(it)}"></div>`;
         }
         d.insertAdjacentHTML('beforeend', `<div class="wb-text" style="${textStyle}">${esc(it.text || '')}</div>`); break;
       }
       case 'icon':
         d.innerHTML = `<img src="${iconUrl(it.icon, it.color || '#7C3AED')}" draggable="false" alt="">`; break;
+      case 'choice': {
+        const opts = it.options || []; const acc = it.color || '#7C3AED';
+        const shown = opts.map((o, i) => ({ ...o, i })).filter(o => !it.onlySelected || o.on);
+        d.style.setProperty('--acc', acc);
+        d.innerHTML = `<div class="ch-head"><span>${esc(it.title || 'Auswahl')}</span><em>${it.mode === 'single' ? 'eine Option' : 'mehrere möglich'} · ${opts.filter(o => o.on).length}/${opts.length}</em></div>
+          <div class="ch-opts" style="grid-template-columns:repeat(${it.cols || 1},minmax(0,1fr))">${shown.map(o => `<div class="ch-opt ${o.on ? 'on' : ''}" data-opt="${o.i}"><i class="ch-box ${it.mode === 'single' ? 'radio' : ''}"></i><span>${esc(o.t)}</span></div>`).join('') || '<div class="ch-empty">Noch nichts ausgewählt</div>'}</div>`;
+        break;
+      }
+      case 'summary':
+        d.innerHTML = `<div class="sum-head">${ic('sparkles', '#FFFFFF', 'ic sm')}<span>${esc(it.title || 'KI-Prompt')}</span><button class="emb-btn sum-copy" data-copy-prompt title="Prompt in die Zwischenablage kopieren">${ic('copy', '#FFFFFF', 'ic xs')} Kopieren</button></div>
+          <pre class="sum-body">${esc(buildPrompt(it))}</pre>`;
+        break;
       case 'draw':
         d.innerHTML = `<svg class="draw" viewBox="0 0 ${it.vw} ${it.vh}" preserveAspectRatio="none"><path d="${smoothPath(it.pts)}" style="fill:none;stroke:${it.color || '#7C3AED'};stroke-width:${it.width || 4};stroke-linecap:round;stroke-linejoin:round;${it.dashed ? 'stroke-dasharray:10 8;' : ''}"/></svg>`; break;
       case 'image':
@@ -422,6 +535,7 @@ window.Board = (() => {
       if (animated || it.cover) d.insertAdjacentHTML('beforeend', `<span class="pres-badge" title="Präsentation: Schritt ${it.step || 1}${it.cover ? ' · verdeckt' : ''}">${it.cover ? '?' : '▶'}${it.step || 1}</span>`);
       if (it.presHide) d.classList.add('pres-hide-mark');
     }
+    if (it.promptInclude && (it.type === 'note' || it.type === 'text')) d.insertAdjacentHTML('beforeend', '<span class="prompt-badge" title="Fließt in den KI-Prompt ein">✦ Prompt</span>');
     if (it.locked) { d.classList.add('locked'); d.insertAdjacentHTML('beforeend', `<span class="lock-badge" title="Gesperrt (Strg+L zum Entsperren)">${ic('lock', '#FFFFFF', 'ic xs')}</span>`); }
     d.insertAdjacentHTML('beforeend', '<div class="wb-resize"></div>');
     return d;
@@ -655,6 +769,8 @@ window.Board = (() => {
     viewport.addEventListener('dblclick', onDblClick);
 
     world.addEventListener('click', e => {
+      const cp = e.target.closest('[data-copy-prompt]');
+      if (cp) { e.stopPropagation(); return copyPrompt(find(cp.closest('.wb-item').dataset.id)); }
       const fx = e.target.closest('[data-frame-export]');
       if (fx) { e.stopPropagation(); return openFrameExport(find(fx.closest('.wb-item').dataset.id)); }
       const btn = e.target.closest('[data-cal],[data-open],[data-html-edit],[data-html-reload]'); if (!btn) return;
@@ -698,7 +814,7 @@ window.Board = (() => {
     if (node?.classList.contains('wb-frame') && !e.target.closest('.frame-title, .wb-resize') && selected !== node.dataset.id) node = null;
     if (node?.classList.contains('wb-frame') && !e.target.closest('.frame-title, .wb-resize') && tool === 'select') node = null;
 
-    if (!node && !linkG && tool === 'select' && e.shiftKey && e.button === 0) {
+    if (!node && !linkG && tool === 'select' && addKey(e) && e.button === 0) {
       const start = toWorld(e.clientX, e.clientY);
       const box = document.createElement('div'); box.className = 'wb-marquee'; world.appendChild(box);
       return startDrag(e, { mode: 'marquee', sx: e.clientX, sy: e.clientY, start, box, base: [...multi] });
@@ -735,19 +851,21 @@ window.Board = (() => {
       }
       setTool('select'); return;
     }
-    if (it.locked && !e.shiftKey) { if (it.group) selectMany(groupMembers(it)); else select(it.id); return; }
+    if (addKey(e) && !e.target.classList.contains('wb-resize')) { // Mehrfachauswahl umschalten (Strg/Cmd/Shift + Klick)
+      world.__suppressClick = true; setTimeout(() => { world.__suppressClick = false; }, 0); // kein Öffnen von Einträgen in Modulen
+      const ids = groupMembers(it);
+      const on = ids.every(i => multi.includes(i) || (multi.length === 0 && selected === i));
+      const base = multi.length ? multi : (selected && find(selected) ? [selected] : []);
+      return selectMany(on ? base.filter(i => !ids.includes(i)) : [...base, ...ids]);
+    }
+    if (it.locked) { if (it.group) selectMany(groupMembers(it)); else select(it.id); return; }
     if (e.target.classList.contains('wb-resize')) {
       select(it.id); pushUndo();
       return startDrag(e, { mode: 'resize', it, node, sx: e.clientX, sy: e.clientY, w: it.w, h: it.h });
     }
     if (it.type === 'embed' && !e.target.closest('.emb-head')) { select(it.id); return; }
     if (it.type === 'html' && !e.target.closest('.html-head')) { select(it.id); return; }
-    if (e.target.closest('.emb-btn, .wb-linkbadge, .frame-btn')) { select(it.id); return; }
-    if (e.shiftKey) { // Mehrfachauswahl umschalten
-      const ids = groupMembers(it);
-      const on = ids.every(i => multi.includes(i));
-      return selectMany(on ? multi.filter(i => !ids.includes(i)) : [...multi, ...ids]);
-    }
+    if (e.target.closest('.emb-btn, .wb-linkbadge, .frame-btn, .sum-copy')) { select(it.id); return; }
     if (!(multi.length > 1 && multi.includes(it.id))) {
       if (it.group) selectMany(groupMembers(it)); else select(it.id);
     }
@@ -759,7 +877,8 @@ window.Board = (() => {
     [...moving].forEach(id => { if (find(id)?.locked) moving.delete(id); });
     const children = [...moving].map(find).filter(Boolean).map(c => ({ c, ox: c.x, oy: c.y, node: nodeOf(c.id) }));
     const orig = { [it.id]: { x: it.x, y: it.y } }; children.forEach(ch => { orig[ch.c.id] = { x: ch.ox, y: ch.oy }; });
-    startDrag(e, { mode: 'move', it, node, sx: e.clientX, sy: e.clientY, ox: it.x, oy: it.y, children, orig, ids: new Set(Object.keys(orig)) });
+    const optEl = it.type === 'choice' ? e.target.closest('[data-opt]') : null;
+    startDrag(e, { mode: 'move', it, node, sx: e.clientX, sy: e.clientY, ox: it.x, oy: it.y, children, orig, ids: new Set(Object.keys(orig)), opt: optEl ? Number(optEl.dataset.opt) : null });
   }
 
   function startDrag(e, state) {
@@ -813,7 +932,10 @@ window.Board = (() => {
         world.__suppressClick = true; setTimeout(() => { world.__suppressClick = false; }, 0);
         scheduleSave();
         if (drag.mode !== 'pan') renderProps();
-      } else if (drag.mode !== 'pan') undoStack.pop();
+      } else if (drag.mode !== 'pan') {
+        undoStack.pop();
+        if (drag.opt != null) { const d0 = drag; drag = null; toggleOption(d0.it, d0.opt); }
+      }
       drag = null;
       $$('.wb-guide', world).forEach(g => g.remove());
       drawHandles(); updateCtxBar();
@@ -844,6 +966,8 @@ window.Board = (() => {
     if (it.type === 'html') return editHtml(it);
     if (it.type === 'frame') return renameFrame(it);
     if (it.type === 'icon') return openIconPicker(it);
+    if (it.type === 'choice') return editChoice(it);
+    if (it.type === 'summary') return editSummary(it);
     if (it.type === 'image') { replaceImageTarget = it; return $('.wb-file', root).click(); }
     if (TEXTUAL.includes(it.type)) editText(it.id);
   }
@@ -880,7 +1004,7 @@ window.Board = (() => {
       tx.oninput = null; root.classList.remove('is-editing'); setTool(tool);
       tx.contentEditable = 'false'; node.classList.remove('editing');
       const val = tx.innerText.replace(/ /g, ' ').replace(/\n$/, '');
-      if (val !== (it.text || '')) { pushUndo(); it.text = val; scheduleSave(); }
+      if (val !== (it.text || '')) { pushUndo(); it.text = val; scheduleSave(); if (it.promptInclude) refreshSummaries(); }
       if (it.type === 'text' && !val.trim()) removeSelected(id);
     };
     tx.addEventListener('blur', finish, { once: true });
@@ -921,6 +1045,16 @@ window.Board = (() => {
         ${window.EyeDropper ? `<button class="sw add" data-pick="${prop}" title="Farbe vom Bildschirm aufnehmen (Pipette)">${ic('pipette', '#6B6780', 'ic xs')}</button>` : ''}
       </div></div>`;
   }
+  function cornerPickHTML(it) {
+    const c = it.corners || {}; const on = k => c[k] !== false; const r = Math.min(it.radius ?? 8, 18);
+    const rad = CORNERS.map(k => (on(k) ? r : 0) + 'px').join(' ');
+    return `<div class="corner-row"><span>Gerundete Ecken</span>
+      <div class="corner-pick" title="Ecken anklicken zum Ein-/Ausschalten">
+        <i class="corner-prev" style="border-radius:${rad}"></i>
+        ${CORNERS.map(k => `<button class="cp cp-${k} ${on(k) ? 'on' : ''}" data-corner="${k}" title="${{ tl: 'oben links', tr: 'oben rechts', br: 'unten rechts', bl: 'unten links' }[k]}"></button>`).join('')}
+      </div></div>
+      <div class="p-row corner-presets">${Object.keys(CORNER_PRESETS).map(k => `<button class="pbtn" data-cpreset="${k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>`;
+  }
   function rangeRow(label, prop, val, min, max, step, unit = '') {
     const shown = unit === '%' ? Math.round(val * 100) : val;
     return `<div class="r-row"><span>${label}</span><input type="range" min="${min}" max="${max}" step="${step}" value="${val}" data-rng="${prop}"><b data-out="${prop}">${shown}${unit}</b></div>`;
@@ -942,7 +1076,7 @@ window.Board = (() => {
         <div class="p-row"><button class="pbtn danger" data-p="delete">Löschen</button></div>`;
     } else {
       const type = it.type;
-      const names = { draw: 'Zeichnung', note: 'Haftnotiz', text: 'Text', rect: 'Rechteck', ellipse: 'Kreis', diamond: 'Raute', shape: SHAPE_DEFS[it.shape]?.[0] || 'Form', icon: 'Icon', image: 'Bild', frame: 'Frame / Folie',
+      const names = { choice: 'Auswahlliste', summary: 'KI-Prompt (automatisch)', draw: 'Zeichnung', note: 'Haftnotiz', text: 'Text', rect: 'Rechteck', ellipse: 'Kreis', diamond: 'Raute', shape: SHAPE_DEFS[it.shape]?.[0] || 'Form', icon: 'Icon', image: 'Bild', frame: 'Frame / Folie',
         embed: EMBEDS[it.kind]?.label || 'Modul', design: DESIGNS[it.kind]?.label || 'Design', html: 'HTML-Visualisierung' };
       html = `<div class="p-title">${names[type]}</div>`;
       // Inhalt
@@ -951,6 +1085,14 @@ window.Board = (() => {
       if (type === 'html') html += `<div class="p-row"><button class="pbtn accent wide" data-p="hedit">${ic('code-xml', '#7C3AED', 'ic xs')} Code bearbeiten</button><button class="pbtn ${it.hideHead ? 'on' : ''}" data-tog="hideHead">Kopfzeile aus</button></div>`;
       if (type === 'embed') html += `<div class="p-row">${(EMBEDS[it.kind].ref || EMBEDS[it.kind].filter || EMBEDS[it.kind].platform) ? '<button class="pbtn" data-p="config">Einstellungen</button>' : ''}<button class="pbtn" data-p="open">Im Modul öffnen</button></div>`;
       if (type === 'icon') html += `<div class="p-row"><button class="pbtn" data-p="reicon">Icon tauschen</button></div>`;
+      if (type === 'choice') html += `<div class="p-row"><button class="pbtn accent wide" data-p="ch-edit">${ic('list-checks', '#7C3AED', 'ic xs')} Optionen bearbeiten</button></div>
+        <div class="p-row"><button class="pbtn ${it.mode !== 'single' ? 'on' : ''}" data-chmode="multi">Mehrfach</button><button class="pbtn ${it.mode === 'single' ? 'on' : ''}" data-chmode="single">Nur eine</button>
+          ${[1, 2, 3].map(c => `<button class="pbtn ${(it.cols || 1) === c ? 'on' : ''}" data-chcols="${c}">${c} Sp.</button>`).join('')}</div>
+        <label class="p-check"><input type="checkbox" data-chkinv="noPrompt" ${it.noPrompt ? '' : 'checked'}> ✦ Im KI-Prompt verwenden${it.label ? ` (als „${esc(it.label)}“)` : ''}</label>
+        <div class="p-row"><button class="pbtn ${it.onlySelected ? 'on' : ''}" data-p="ch-only">Nur Ausgewähltes zeigen</button><button class="pbtn" data-p="ch-reset">Auswahl leeren</button><button class="pbtn" data-p="ch-fit">Höhe anpassen</button></div>`;
+      if (type === 'summary') html += `<div class="p-row"><button class="pbtn accent wide" data-p="sum-copy">${ic('copy', '#7C3AED', 'ic xs')} Prompt kopieren</button></div>
+        <div class="p-row"><button class="pbtn wide" data-p="sum-edit">Einleitung & Abschluss anpassen</button></div>
+        <div class="muted small">Sammelt automatisch alle ausgewählten Optionen und Notizen mit „In KI-Prompt übernehmen“.</div>`;
       if (it.group) html += `<div class="p-row"><button class="pbtn" data-m="ungroup">Gruppierung aufheben</button></div>`;
       if (type === 'frame') html += `<div class="p-row"><button class="pbtn accent wide" data-p="save-frame">${ic('bookmark-plus', '#7C3AED', 'ic xs')} Als Frame-Vorlage speichern</button></div>`;
       if (type === 'frame') html += `<div class="p-row"><input class="input sm wide" data-txt="title" value="${esc(it.title || '')}" placeholder="Titel"></div>
@@ -974,11 +1116,12 @@ window.Board = (() => {
         html += colorRow('Füllung', 'fillColor', it.fillColor || it.color || '#7C3AED') + colorRow('Rahmen', 'color', it.color || '#7C3AED')
           + rangeRow('Deckkraft Füllung', 'fillOpacity', it.fillOpacity ?? (it.fill === false ? 0 : 0.12), 0, 1, 0.05, '%')
           + rangeRow('Rahmenstärke', 'strokeWidth', it.strokeWidth ?? 2.5, 0, 12, 0.5)
-          + (type === 'rect' ? rangeRow('Eckenradius', 'radius', it.radius ?? 8, 0, 80, 1) : '')
+          + (type === 'rect' ? rangeRow('Eckenradius', 'radius', it.radius ?? 8, 0, 200, 1) + cornerPickHTML(it) : '')
           + `<div class="p-row"><button class="pbtn ${it.dashed ? 'on' : ''}" data-tog="dashed">Gestrichelt</button></div>`
           + colorRow('Schrift', 'textColor', it.textColor || '#1F1B2E');
       }
       if (type === 'icon') html += colorRow('Farbe', 'color', it.color || '#7C3AED');
+      if (type === 'choice') html += colorRow('Akzentfarbe', 'color', it.color || '#7C3AED');
       if (type === 'draw') html += colorRow('Strichfarbe', 'color', it.color || '#7C3AED') + rangeRow('Strichstärke', 'width', it.width || 4, 1, 40, 1) + `<div class="p-row"><button class="pbtn ${it.dashed ? 'on' : ''}" data-tog="dashed">Gestrichelt</button></div>`;
       if (type === 'embed') html += colorRow('Kopfzeile', 'headColor', it.headColor || '#7C3AED');
       if (type === 'html') html += colorRow('Kopfzeile', 'headColor', it.headColor || '#1F1B2E');
@@ -992,6 +1135,7 @@ window.Board = (() => {
       if (type !== 'frame') html += rangeRow('Drehung', 'rot', it.rot || 0, -180, 180, 1, '°');
       html += `<div class="p-row"><button class="pbtn ${it.shadow ? 'on' : ''}" data-tog="shadow">Schatten</button></div>`;
 
+      if (type === 'note' || type === 'text' || SHAPES.includes(type)) html += `<label class="p-check"><input type="checkbox" data-chk="promptInclude" ${it.promptInclude ? 'checked' : ''}> ✦ In KI-Prompt übernehmen</label>`;
       // Text
       if (TEXTUAL.includes(type)) {
         html += `<div class="p-sub">Text</div><div class="p-row"><button class="pbtn" data-p="fs-">A−</button><span class="fs-val">${it.fs || (type === 'text' ? 22 : 16)}px</span><button class="pbtn" data-p="fs+">A+</button>
@@ -1076,8 +1220,10 @@ window.Board = (() => {
       if (t.dataset.sel) setProp(o, t.dataset.sel, t.value);
       if (t.dataset.num) setProp(o, t.dataset.num, t.value === '' ? null : Number(t.value));
       if (t.dataset.chk) setProp(o, t.dataset.chk, t.checked);
+      if (t.dataset.chkinv) { setProp(o, t.dataset.chkinv, !t.checked); setTimeout(refreshSummaries, 0); }
       if (t.dataset.txt) setProp(o, t.dataset.txt, t.value);
       if (t.dataset.sel === 'anim' && t.value !== 'none') previewAnim(o);
+      if (t.dataset.chk === 'promptInclude') setTimeout(refreshSummaries, 0);
       liveUpdate(o); renderProps(); scheduleSave();
     });
     props.addEventListener('contextmenu', async e => {
@@ -1094,6 +1240,10 @@ window.Board = (() => {
     if (b.dataset.m) return multiAction(b.dataset.m);
     const o = current(); if (!o) return;
     const d = b.dataset;
+    if (d.chmode) { pushUndo(); o.mode = d.chmode; if (o.mode === 'single') { let seen = false; o.options.forEach(x => { if (x.on && seen) x.on = false; if (x.on) seen = true; }); } rerenderItem(o); return refreshSummaries(); }
+    if (d.chcols) { pushUndo(); o.cols = Number(d.chcols); o.h = choiceHeight(o); return rerenderItem(o); }
+    if (d.corner) { pushUndo(); o.corners = { ...(o.corners || {}) }; o.corners[d.corner] = o.corners[d.corner] === false; if ((o.radius ?? 8) === 0) o.radius = 16; liveUpdate(o); renderProps(); return scheduleSave(); }
+    if (d.cpreset) { pushUndo(); const v = CORNER_PRESETS[d.cpreset]; o.corners = Object.fromEntries(CORNERS.map((k, i) => [k, !!v[i]])); if (d.cpreset !== 'keine' && (o.radius ?? 8) === 0) o.radius = 16; liveUpdate(o); renderProps(); return scheduleSave(); }
     if (d.qc) { pushUndo(); applyQuick(o, d.qc.split('|')); lastShapeColors = d.qc.split('|'); liveUpdate(o); renderProps(); return scheduleSave(); }
     if (d.pick) {
       try { const r = await new EyeDropper().open(); pushUndo(); setColor(o, d.pick, r.sRGBHex); liveUpdate(o); renderProps(); scheduleSave(); } catch { /* abgebrochen */ }
@@ -1129,6 +1279,12 @@ window.Board = (() => {
       case 'open': location.hash = '#/' + EMBEDS[it.kind].module; return;
       case 'config': { const cfg = await embedConfig(it.kind, it.cfg || {}); if (!cfg) return; pushUndo(); it.cfg = { ...it.cfg, ...cfg }; return rerenderItem(it); }
       case 'reicon': return openIconPicker(it);
+      case 'ch-edit': return editChoice(it);
+      case 'ch-only': pushUndo(); it.onlySelected = !it.onlySelected; it.h = choiceHeight(it); return rerenderItem(it);
+      case 'ch-reset': pushUndo(); it.options.forEach(o => { o.on = false; }); if (it.onlySelected) it.h = choiceHeight(it); rerenderItem(it); return refreshSummaries();
+      case 'ch-fit': pushUndo(); it.h = choiceHeight(it); return rerenderItem(it);
+      case 'sum-copy': return copyPrompt(it);
+      case 'sum-edit': return editSummary(it);
       case 'reshape': return toggleShapePicker(b, it);
       case 'dcontent': return editDesignContent(it);
       case 'hedit': return editHtml(it);
@@ -1152,6 +1308,9 @@ window.Board = (() => {
       <div class="p-sub">Farbe für alle</div>
       <div class="swatches qcs">${QUICK_COLORS.map(([f, s2]) => `<button class="qc" data-m="qc:${f}|${s2}" style="--f:${f};--s:${s2}"></button>`).join('')}
         <label class="sw custom" title="Eigene Füllfarbe für alle"><input type="color" id="multi-fill" value="#7C3AED"></label></div>
+      ${items.some(i => i.type === 'rect') ? `<div class="p-sub">Ecken (alle Rechtecke)</div>
+        <div class="p-row">${[0, 8, 16, 32, 64].map(r => `<button class="pbtn" data-m="rad:${r}">${r} px</button>`).join('')}</div>
+        <div class="p-row corner-presets">${Object.keys(CORNER_PRESETS).map(k => `<button class="pbtn" data-m="cpre:${k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>` : ''}
       <div class="p-sub">Ausrichten</div>
       <div class="p-row icons">
         <button class="pbtn" data-m="al-left" title="Links ausrichten">${ic('align-start-vertical', '#4B4563', 'ic sm')}</button>
@@ -1172,11 +1331,20 @@ window.Board = (() => {
       <div class="p-sub">Weitere</div>
       <div class="p-row"><button class="pbtn" data-m="frame">In Frame packen</button><button class="pbtn" data-m="dup">Duplizieren</button></div>
       <div class="p-row"><button class="pbtn danger" data-m="delete">Alle löschen</button></div>
-      <div class="muted small">Tipp: Shift + Klick fügt hinzu, Shift + Ziehen auf leerer Fläche wählt per Rahmen.</div>`;
+      <div class="muted small">Tipp: Strg/Cmd + Klick fügt hinzu oder entfernt, Strg/Cmd + Ziehen auf leerer Fläche wählt per Rahmen.</div>`;
   }
 
   function multiAction(a) {
     let items = selItems();
+    if (a.startsWith('rad:') || a.startsWith('cpre:')) {
+      pushUndo();
+      items.filter(i => i.type === 'rect').forEach(i => {
+        if (a.startsWith('rad:')) i.radius = Number(a.slice(4));
+        else { const v = CORNER_PRESETS[a.slice(5)]; i.corners = Object.fromEntries(CORNERS.map((k, n) => [k, !!v[n]])); if ((i.radius ?? 8) === 0 && a !== 'cpre:keine') i.radius = 16; }
+        updateVisual(i);
+      });
+      markSelection(); return scheduleSave();
+    }
     if (a.startsWith('qc:') || a.startsWith('fill:')) {
       pushUndo();
       const pair = a.startsWith('qc:') ? a.slice(3).split('|') : [a.slice(5), a.slice(5)];
@@ -1905,6 +2073,8 @@ window.Board = (() => {
     const quick = QUICK_COLORS.slice(0, 7);
     return `${textual ? `<button class="cb" data-cb="edit" title="Text bearbeiten (Enter oder einfach lostippen)">${ic('pencil', '#4B4563', 'ic sm')}<span>Text</span></button><i class="cb-sep"></i>` : ''}
       ${one?.type === 'design' ? `<button class="cb" data-cb="design" title="Inhalt bearbeiten">${ic('pencil', '#4B4563', 'ic sm')}<span>Inhalt</span></button><i class="cb-sep"></i>` : ''}
+      ${one?.type === 'choice' ? `<button class="cb" data-cb="choice" title="Optionen bearbeiten (Doppelklick)">${ic('list-checks', '#4B4563', 'ic sm')}<span>Optionen</span></button><i class="cb-sep"></i>` : ''}
+      ${one?.type === 'summary' ? `<button class="cb" data-cb="prompt" title="Prompt kopieren">${ic('copy', '#4B4563', 'ic sm')}<span>Prompt kopieren</span></button><i class="cb-sep"></i>` : ''}
       ${one?.type === 'html' ? `<button class="cb" data-cb="html" title="Code bearbeiten">${ic('code-xml', '#4B4563', 'ic sm')}<span>Code</span></button><i class="cb-sep"></i>` : ''}
       ${one?.type === 'frame' ? `<button class="cb" data-cb="export" title="Frame als Bild exportieren">${ic('download', '#4B4563', 'ic sm')}<span>Export</span></button><i class="cb-sep"></i>` : ''}
       ${colorable ? `${quick.map(([f, s2]) => `<button class="qc" data-cbq="${f}|${s2}" style="--f:${f};--s:${s2}" title="Farbe"></button>`).join('')}
@@ -1930,6 +2100,8 @@ window.Board = (() => {
         case 'edit': return editText(one.id, { selectAll: true });
         case 'design': return editDesignContent(one);
         case 'html': return editHtml(one);
+        case 'choice': return editChoice(one);
+        case 'prompt': return copyPrompt(one);
         case 'export': return openFrameExport(one);
         case 'fs-': case 'fs+': pushUndo(); one.fs = clamp((one.fs || (one.type === 'text' ? 22 : 16)) + (b.dataset.cb === 'fs+' ? 2 : -2), 8, 160); return rerenderItem(one);
         case 'bold': pushUndo(); one.bold = !one.bold; bar.dataset.key = ''; return rerenderItem(one);
@@ -1991,11 +2163,12 @@ window.Board = (() => {
   function closeMenus() { $$('.wb-menu', root).forEach(m => m.remove()); }
   function openContextMenu(e) {
     if (P.active) return; e.preventDefault(); closeMenus();
+    if (e.ctrlKey && e.button === 0) return; // Mac: Ctrl+Klick dient der Mehrfachauswahl, kein Menü
     const tgt = document.elementFromPoint(e.clientX, e.clientY);
     let node = tgt?.closest('.wb-item'); if (node?.classList.contains('wb-frame') && !tgt.closest('.frame-title')) node = null;
     const pt = toWorld(e.clientX, e.clientY);
     if (node && !multi.includes(node.dataset.id)) { const it = find(node.dataset.id); it.group ? selectMany(groupMembers(it)) : select(it.id); }
-    if (!node && !e.shiftKey) select(null);
+    if (!node && !addKey(e)) select(null);
     const items = selItems(); const one = items.length === 1 ? items[0] : null;
     const entries = items.length ? [
       one && TEXTUAL.includes(one.type) && ['edit', 'pencil', 'Text bearbeiten', 'Enter'],
@@ -2071,7 +2244,7 @@ window.Board = (() => {
   function showShortcuts() {
     const rows = [
       ['Bearbeiten', [['Doppelklick', 'Text/Inhalt bearbeiten'], ['Einfach lostippen', 'Text der Auswahl ersetzen'], ['Enter', 'Text bearbeiten'], ['Esc / Strg+Enter', 'Bearbeiten beenden'], ['Doppelklick auf leere Fläche', 'Neue Notiz']]],
-      ['Auswahl', [['Shift + Klick', 'Zur Auswahl hinzufügen'], ['Shift + Ziehen', 'Auswahlrahmen'], ['Strg+A', 'Alles auswählen'], ['Pfeiltasten', 'Verschieben (Shift = 10 px)'], ['Strg+G / Strg+Shift+G', 'Gruppieren / aufheben'], ['Strg+L', 'Sperren / entsperren']]],
+      ['Auswahl', [['Strg/Cmd + Klick', 'Zur Auswahl hinzufügen / entfernen'], ['Strg/Cmd + Ziehen', 'Auswahlrahmen (auch Shift)'], ['Strg+A', 'Alles auswählen'], ['Pfeiltasten', 'Verschieben (Shift = 10 px)'], ['Strg+G / Strg+Shift+G', 'Gruppieren / aufheben'], ['Strg+L', 'Sperren / entsperren']]],
       ['Allgemein', [['Strg+C / X / V', 'Kopieren / Ausschneiden / Einfügen'], ['Strg+D', 'Duplizieren'], ['Strg+Z', 'Rückgängig'], ['Entf', 'Löschen'], ['Rechtsklick', 'Kontextmenü'], ['Ziehen an ● Punkten', 'Verbinden bzw. neues Element']]],
       ['Werkzeuge', [['V / H', 'Auswählen / Hand'], ['N / T', 'Notiz / Text'], ['R / O / D', 'Rechteck / Kreis / Formen'], ['L', 'Verbindung'], ['B', 'Stift (freihand)'], ['F', 'Frame & Social-Formate'], ['G / I / Y / E', 'Designs / Icons / HTML / Modul']]],
       ['Ansicht', [['Mausrad', 'Zoomen'], ['Leertaste + Ziehen', 'Fläche verschieben'], ['0', 'Alles einpassen'], ['P', 'Präsentieren'], ['Alt beim Ziehen', 'Hilfslinien aus'], ['?', 'Diese Hilfe']]],
@@ -2112,11 +2285,12 @@ window.Board = (() => {
     if (e.code === 'Space') { spaceDown = true; viewport.classList.add('panning'); e.preventDefault(); return; }
     if (e.key === 'Delete' || e.key === 'Backspace') { if (selected || multi.length) { e.preventDefault(); if (selItems().some(i => i.locked)) return toast('Gesperrte Elemente zuerst entsperren (Strg+L)'); removeSelected(selected || multi[0]); } return; }
     if (e.key === 'Escape') { setTool('select'); select(null); closeMenus(); return; }
-    if (e.key === 'Enter' && selected && find(selected)) { e.preventDefault(); const it = find(selected); if (TEXTUAL.includes(it.type)) return editText(selected, { selectAll: true }); if (it.type === 'design') return editDesignContent(it); if (it.type === 'html') return editHtml(it); return; }
+    if (e.key === 'Enter' && selected && find(selected)) { e.preventDefault(); const it = find(selected); if (TEXTUAL.includes(it.type)) return editText(selected, { selectAll: true }); if (it.type === 'design') return editDesignContent(it); if (it.type === 'html') return editHtml(it); if (it.type === 'choice') return editChoice(it); if (it.type === 'summary') return editSummary(it); return; }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const map = { v: 'select', h: 'hand', n: 'note', t: 'text', r: 'rect', o: 'ellipse', l: 'connect', b: 'pen' };
     if (k === 'f') return openFrameTemplates();
     if (k === 'd') return toggleShapePicker($('[data-tool=shapes]', root));
+    if (k === 'k') return addChoice();
     if (map[k]) setTool(map[k]);
     if (k === 'i') openIconPicker();
     if (k === 'e') openEmbedPicker();
@@ -2129,8 +2303,13 @@ window.Board = (() => {
   }
 
   // ---------- Board-Vorlagen ----------------------------------------------
-  async function applyTemplate() {
-    const t = await choose('Board-Vorlage einfügen', [
+  async function applyTemplate(direct) {
+    const own = getSetting('boardTemplates', []);
+    const t = direct || await choose('Board-Vorlage einfügen', [
+      { value: 'appconcept', label: 'App-Konzept (Vibe Coding)', desc: 'Frames für Idee, Zielgruppe, Endgerät, Funktionen, Design, Tools … + automatischer KI-Prompt', icon: 'smartphone' },
+      ...own.map(x => ({ value: 'own:' + x.id, label: '★ ' + x.name, desc: `Eigene Vorlage · ${x.items.length} Elemente`, icon: 'bookmark' })),
+      { value: 'save', label: 'Aktuelles Board als Vorlage speichern …', desc: 'Alles (oder nur die Auswahl) als eigene, wiederverwendbare Vorlage', icon: 'bookmark-plus' },
+      ...(own.length ? [{ value: 'manage', label: 'Eigene Vorlagen verwalten', desc: 'Umbenennen oder löschen', icon: 'settings' }] : []),
       { value: 'pitch', label: 'Präsentation (3 Folien)', desc: 'Frames mit Titel, Kennzahlen und Zeitstrahl – inkl. Animationen', icon: 'presentation' },
       { value: 'strategy', label: 'Content-Strategie', desc: 'Zielgruppe, Säulen, Funnel + eingebettete Ziele & Pipeline', icon: 'map' },
       { value: 'week', label: 'Wochenplanung', desc: '7 Tagesspalten, Aufgabenliste und Kalender', icon: 'calendar-range' },
@@ -2139,6 +2318,9 @@ window.Board = (() => {
       { value: 'funnel', label: 'Content-Funnel', desc: 'Reichweite → Vertrauen → Community → Angebot', icon: 'filter' },
     ]);
     if (!t) return;
+    if (t === 'save') return saveBoardTemplate();
+    if (t === 'manage') return manageBoardTemplates();
+    if (t.startsWith('own:')) { const tp = own.find(x => x.id === t.slice(4)); if (!tp) return toast('Vorlage nicht gefunden'); return insertBoardTemplate(tp); }
     const xs = data.items.map(i => i.x + i.w);
     const ox = xs.length ? Math.max(...xs) + 160 : 0, oy = data.items.length ? Math.min(...data.items.map(i => i.y)) : 0;
     const items = [], links = [];
@@ -2148,6 +2330,7 @@ window.Board = (() => {
     const th = { c1: '#7C3AED', c2: '#34D399', bg: '#FFFFFF', ink: '#1F1B2E' };
     const design = (kind, x, y, scale = 1, extra = {}) => { const d = DESIGNS[kind]; return add({ type: 'design', kind, data: { ...d.defaults }, c: { ...th }, x, y, w: Math.round(d.w * scale), h: Math.round(d.h * scale), ...extra }); };
 
+    if (t === 'appconcept') buildAppConcept(add);
     if (t === 'pitch') {
       add({ type: 'frame', x: 0, y: 0, w: 960, h: 540, color: '#FFFFFF', title: 'Folie 1 – Titel', order: 1 });
       design('banner', 100, 150, 1, { anim: 'up', step: 1 });
@@ -2210,6 +2393,131 @@ window.Board = (() => {
     pushUndo();
     data.items.push(...items); data.connectors.push(...links);
     render(); fit(); scheduleSave();
+  }
+
+  // ---------- Vorlage: App-Konzept (Vibe Coding) --------------------------
+  function buildAppConcept(add) {
+    const FW = 620, PAD = 24, GAP = 70, COLS = 3;
+    // Bezeichnung im KI-Prompt (null = nicht in den Prompt übernehmen)
+    const LABELS = { 'Was wird gebaut?': 'App-Typ', 'Für wen?': 'Zielgruppe', 'Technik-Erfahrung der Nutzer': 'Technik-Erfahrung der Nutzer', 'Läuft auf': 'Plattform / Endgeräte', 'Ausrichtung': 'Bildschirm-Ausrichtung',
+      'Funktionen': 'Funktionen', 'Genre': 'Spiel-Genre', 'Steuerung': 'Steuerung', 'Fortschritt': 'Spielfortschritt', 'Look': 'Design-Stil', 'Speicherung': 'Daten & Backend', 'Tool': null,
+      'Technik (falls gewünscht)': 'Technik', 'Geschäftsmodell': 'Monetarisierung', 'Wo erscheint die App?': 'Veröffentlichung', 'Komplexität': 'Umfang', 'Video-Format': null, 'Kapitel (abhaken beim Dreh)': null };
+    const colors = ['#7C3AED', '#059669', '#EA580C', '#6366F1', '#DB2777', '#0284C7'];
+    add({ type: 'text', x: 0, y: -150, w: 1400, h: 64, text: 'App-Konzept · Vibe Coding', fs: 46, bold: true, color: '#1F1B2E' });
+    add({ type: 'note', x: 0, y: -70, w: 1300, h: 50, color: '#F5F3FF', fs: 15, align: 'left',
+      text: 'So geht’s: Optionen einfach anklicken · Doppelklick auf eine Liste = Optionen bearbeiten · Notizen mit „✦ Prompt“ fließen in den KI-Prompt ganz unten ein.' });
+    const S = [
+      ['1 · App-Idee', [
+        { note: 'Die Idee in einem Satz:\nEine App, die …', h: 110, prompt: true, color: '#EDE9FE' },
+        { note: 'Welches Problem löst sie? Warum ist sie nützlich oder macht Spaß?', h: 100, prompt: true, color: '#EDE9FE' },
+        { row: [{ note: 'Arbeitstitel / Name:', h: 70, prompt: true, color: '#FFEDD5' }, { note: 'Vorbild / ähnliche Apps:', h: 70, color: '#FFEDD5' }] },
+      ]],
+      ['2 · App-Typ', [{ ch: ['Was wird gebaut?', ['Handyspiel (Casual Game)', 'Web-App', 'Native Handy-App (iOS/Android)', 'Progressive Web App (PWA)', 'Desktop-App', 'Browser-Erweiterung', 'KI-App / Chatbot', 'Tool / Utility', 'Landingpage / Website'], { mode: 'single', cols: 2 }] }]],
+      ['3 · Zielgruppe', [
+        { ch: ['Für wen?', ['Kinder', 'Jugendliche', 'Junge Erwachsene', 'Erwachsene', 'Senioren', 'Familien', 'Gamer', 'Studierende', 'Berufstätige', 'Selbstständige', 'Unternehmen (B2B)', 'Content Creator'], { cols: 3 }] },
+        { ch: ['Technik-Erfahrung der Nutzer', ['Anfänger', 'Fortgeschritten', 'Profis'], { mode: 'single', cols: 3 }] },
+      ]],
+      ['4 · Endgerät & Plattform', [
+        { ch: ['Läuft auf', ['Smartphone (iOS)', 'Smartphone (Android)', 'Tablet', 'Desktop-Browser', 'Mobiler Browser', 'Installierbar (PWA)', 'Smartwatch', 'Smart-TV'], { cols: 2 }] },
+        { ch: ['Ausrichtung', ['Hochformat', 'Querformat', 'Beides'], { mode: 'single', cols: 3 }] },
+      ]],
+      ['5 · Kernfunktionen', [{ ch: ['Funktionen', ['Login / Benutzerkonto', 'Profil', 'Feed / Startseite', 'Suche & Filter', 'Chat / Nachrichten', 'Push-Benachrichtigungen', 'Kamera / Fotos', 'Standort & Karten', 'Kalender / Termine', 'Bestenliste / Highscore', 'Offline nutzbar', 'Teilen in Social Media', 'Bezahlfunktion', 'KI-Funktion', 'Datei-Upload', 'Statistiken & Diagramme', 'Mehrsprachig', 'Dark Mode', 'Sound & Musik', 'Einstellungen'], { cols: 2 }] }]],
+      ['6 · Spielmechanik (nur bei Spielen)', [
+        { ch: ['Genre', ['Jump’n’Run', 'Endless Runner', 'Puzzle', 'Quiz', 'Arcade-Klassiker', 'Idle / Clicker', 'Geschicklichkeit', 'Strategie', 'Rätsel / Escape', 'Multiplayer'], { cols: 2 }] },
+        { ch: ['Steuerung', ['Tippen', 'Wischen', 'Gedrückt halten', 'Neigen (Sensor)', 'Tastatur', 'Maus'], { cols: 3 }] },
+        { ch: ['Fortschritt', ['Level', 'Punkte', 'Leben', 'Power-ups', 'Errungenschaften', 'Tägliche Belohnung'], { cols: 3 }] },
+      ]],
+      ['7 · Design & Stil', [
+        { ch: ['Look', ['Minimalistisch', 'Verspielt & bunt', 'Retro / Pixel-Art', 'Modern & clean', 'Dunkel / Neon', 'Glassmorphism', 'Handgezeichnet', 'Business / seriös', 'Cartoon'], { cols: 3 }] },
+        { note: 'Farben & Schrift (z. B. Violett #7C3AED, Mint, Orange · runde Schrift):', h: 80, prompt: true, color: '#D1FAE5' },
+      ]],
+      ['8 · Daten & Backend', [{ ch: ['Speicherung', ['Keine Daten nötig', 'Lokal im Gerät (LocalStorage)', 'Datenbank (z. B. Supabase, Firebase)', 'Benutzerkonten & Login', 'Echtzeit-Synchronisation', 'Datei- / Bildspeicher', 'Externe APIs (Wetter, Karten …)', 'KI-API (z. B. Claude)'], { cols: 1 }] }]],
+      ['9 · Vibe-Coding-Tool & Technik', [
+        { ch: ['Tool', ['Claude', 'Claude Code', 'Cursor', 'Lovable', 'Bolt', 'Replit', 'v0', 'GitHub Copilot'], { cols: 2 }] },
+        { ch: ['Technik (falls gewünscht)', ['Einfach: HTML, CSS & JavaScript', 'React', 'Next.js', 'React Native / Expo', 'Flutter', 'Python', 'Phaser (2D-Spiele)', 'Three.js (3D)', 'Tailwind CSS', 'Egal – die KI soll entscheiden'], { cols: 2 }] },
+      ]],
+      ['10 · Monetarisierung', [{ ch: ['Geschäftsmodell', ['Kostenlos', 'Werbung', 'In-App-Käufe', 'Abo', 'Einmalkauf', 'Spenden', 'Nur Demo fürs Video'], { cols: 2 }] }]],
+      ['11 · Veröffentlichung', [{ ch: ['Wo erscheint die App?', ['Apple App Store', 'Google Play Store', 'Eigene Website', 'GitHub Pages', 'Vercel / Netlify', 'itch.io (Spiele)', 'Nur lokal / Demo'], { cols: 2 }] }]],
+      ['12 · Umfang & Video', [
+        { ch: ['Komplexität', ['Mini (unter 1 Stunde)', 'Klein (1 Tag)', 'Mittel (Wochenende)', 'Groß (mehrere Wochen)'], { mode: 'single', cols: 2 }] },
+        { ch: ['Video-Format', ['YouTube Short', 'Tutorial (10–20 Min.)', 'Langes Projekt-Video', 'Mehrteilige Serie', 'Livestream'], { cols: 2 }] },
+      ]],
+      ['13 · MVP-Plan', [
+        { row: [{ note: 'MUSS (Version 1):\n• \n• \n• ', h: 190, prompt: true, color: '#D1FAE5', align: 'left' }, { note: 'SOLL:\n• \n• ', h: 190, color: '#FEF9C3', align: 'left' }, { note: 'KANN später:\n• \n• ', h: 190, color: '#FCE7F3', align: 'left' }] },
+      ]],
+      ['14 · Video-Ablauf', [
+        { ch: ['Kapitel (abhaken beim Dreh)', ['Hook: fertige App zuerst zeigen', 'Die Idee erklären', 'Konzept auf diesem Board', 'Erster Prompt', 'Erster Prototyp', 'Iterieren & verbessern', 'Fehler & wie die KI sie löst', 'Design-Feinschliff', 'Ergebnis & Live-Test', 'Fazit + Call-to-Action'], { cols: 1 }] },
+        { note: 'Hook-Idee für den Einstieg:', h: 80, color: '#FFEDD5' },
+      ]],
+    ];
+    let col = 0, rowY = 0, rowH = 0, n = 0;
+    const W = FW - PAD * 2;
+    S.forEach(([title, blocks]) => {
+      const color = colors[n % colors.length]; n++;
+      const fx = col * (FW + GAP), fy = rowY;
+      const kids = []; let cy = PAD + 4;
+      blocks.forEach(b => {
+        if (b.ch) { const [t, o, opt] = b.ch; const c = makeChoice(t, o, { ...opt, color, w: W }); const lab = LABELS[t]; if (lab === null) c.noPrompt = true; else if (lab) c.label = lab; kids.push({ ...c, x: fx + PAD, y: fy + cy }); cy += c.h + 18; }
+        if (b.note) { kids.push({ type: 'note', x: fx + PAD, y: fy + cy, w: W, h: b.h, color: b.color, text: b.note, ph: b.note, fs: 15, align: b.align || 'left', promptInclude: !!b.prompt }); cy += b.h + 18; }
+        if (b.row) { const cw = (W - (b.row.length - 1) * 14) / b.row.length; const hh = Math.max(...b.row.map(r => r.h));
+          b.row.forEach((r, i) => kids.push({ type: 'note', x: fx + PAD + i * (cw + 14), y: fy + cy, w: Math.round(cw), h: hh, color: r.color, text: r.note, ph: r.note, fs: 14, align: r.align || 'left', promptInclude: !!r.prompt }));
+          cy += hh + 18; }
+      });
+      const fh = cy + PAD - 18 + 8;
+      add({ type: 'frame', x: fx, y: fy, w: FW, h: fh, color: '#FFFFFF', title, order: n });
+      kids.forEach(k => add(k));
+      rowH = Math.max(rowH, fh);
+      col++; if (col >= COLS) { col = 0; rowY += rowH + GAP + 30; rowH = 0; }
+    });
+    if (col) rowY += rowH + GAP + 30;
+    const SW = COLS * FW + (COLS - 1) * GAP;
+    add({ type: 'frame', x: 0, y: rowY, w: SW, h: 520, color: '#F5F3FF', title: '15 · KI-Prompt (wird automatisch erstellt)', order: n + 1 });
+    add({ type: 'summary', x: PAD, y: rowY + PAD + 4, w: SW - PAD * 2, h: 470, title: 'Dein Prompt für das Vibe-Coding-Tool' });
+  }
+
+  // ---------- Eigene Board-Vorlagen ---------------------------------------
+  async function saveBoardTemplate() {
+    if (!data.items.length) return toast('Das Board ist leer');
+    const sel = selItems();
+    const v = await openForm({ title: 'Als Board-Vorlage speichern', submitLabel: 'Speichern',
+      values: { name: board.name, scope: sel.length > 1 ? 'sel' : 'all', reset: false },
+      extra: '<p class="muted small" style="margin:-6px 0 12px">Gespeichert werden alle Elemente samt Frames, Farben, Auswahllisten, Verbindungen und Animationen. Die Vorlage steht danach in jedem Board unter „Board-Vorlage“ und beim Anlegen neuer Boards zur Verfügung.</p>',
+      fields: [
+        { key: 'name', label: 'Name der Vorlage', required: true },
+        { key: 'scope', label: 'Umfang', type: 'select', options: [['all', `Ganzes Board (${data.items.length} Elemente)`], ...(sel.length > 1 ? [['sel', `Nur Auswahl (${sel.length} Elemente)`]] : [])] },
+        { key: 'reset', label: 'Ausgewählte Optionen in Auswahllisten zurücksetzen (leere Vorlage)', type: 'checkbox' },
+      ] });
+    if (!v) return;
+    let items = v.scope === 'sel' ? sel : data.items;
+    const ids = new Set(items.map(i => i.id));
+    if (v.scope === 'sel') items.filter(i => i.type === 'frame').forEach(f => data.items.forEach(c => { if (inside(c, f)) ids.add(c.id); }));
+    items = data.items.filter(i => ids.has(i.id)).filter(i => i.type !== 'embed' || true);
+    const b = bbox(items);
+    const copy = JSON.parse(JSON.stringify(items)).map(i => { i.x -= b.x; i.y -= b.y; delete i.locked; if (v.reset && i.type === 'choice') i.options.forEach(o => { o.on = false; }); return i; });
+    const tpl = { id: uid(), name: v.name, items: copy, connectors: JSON.parse(JSON.stringify(data.connectors.filter(c => ids.has(c.from) && ids.has(c.to)))) };
+    const list = getSetting('boardTemplates', []).filter(x => x.name !== v.name);
+    await setSetting('boardTemplates', [...list, tpl]);
+    toast(`Vorlage „${v.name}“ gespeichert${list.length !== getSetting('boardTemplates', []).length - 1 ? ' (überschrieben)' : ''}`);
+  }
+  function insertBoardTemplate(tpl) {
+    const xs = data.items.map(i => i.x + i.w);
+    const ox = xs.length ? Math.max(...xs) + 200 : 0, oy = data.items.length ? Math.min(...data.items.map(i => i.y)) : 0;
+    const map = {}, groups = {}, carousels = {};
+    pushUndo();
+    const items = JSON.parse(JSON.stringify(tpl.items)).map(i => { const nid = uid(); map[i.id] = nid; i.id = nid; i.x += ox; i.y += oy; if (i.group) i.group = groups[i.group] ||= uid(); if (i.carousel) i.carousel = carousels[i.carousel] ||= uid(); return i; });
+    data.items.unshift(...items.filter(i => i.type === 'frame')); data.items.push(...items.filter(i => i.type !== 'frame'));
+    (tpl.connectors || []).forEach(c => { if (map[c.from] && map[c.to]) data.connectors.push({ ...c, id: uid(), from: map[c.from], to: map[c.to] }); });
+    render(); world.style.transition = 'transform .5s ease'; data.view = viewFor(bbox(items), 60); applyView(); setTimeout(() => { world.style.transition = ''; }, 550);
+    scheduleSave(); toast(`Vorlage „${tpl.name}“ eingefügt`);
+  }
+  async function manageBoardTemplates() {
+    const own = getSetting('boardTemplates', []);
+    const id = await choose('Eigene Board-Vorlagen', own.map(t => ({ value: t.id, label: t.name, desc: `${t.items.length} Elemente · klicken zum Umbenennen oder Löschen`, icon: 'bookmark' })));
+    if (!id) return;
+    const t = own.find(x => x.id === id);
+    const act = await choose(`„${t.name}“`, [{ value: 'rename', label: 'Umbenennen', icon: 'pencil' }, { value: 'delete', label: 'Löschen', icon: 'trash-2' }]);
+    if (act === 'rename') { const v = await openForm({ title: 'Vorlage umbenennen', values: { name: t.name }, fields: [{ key: 'name', label: 'Name', required: true }] }); if (v) { t.name = v.name; await setSetting('boardTemplates', own); toast('Umbenannt'); } }
+    if (act === 'delete' && confirm(`Vorlage „${t.name}“ löschen?`)) { await setSetting('boardTemplates', own.filter(x => x.id !== id)); toast('Vorlage gelöscht'); }
   }
 
   return { mount };
