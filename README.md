@@ -71,7 +71,12 @@ Für die Planung von Apps, Handyspielen und Web-Apps, die du mit KI baust (z. B.
 **Aufbau in 11 Phasen von links nach rechts:** Jede Phase ist eine farbige Spalte mit großem Kopf (Nummer, Emoji, Titel und ein Satz Erklärung, ideal auch für Zuschauer im Video). Pfeile zwischen den Köpfen zeigen den Weg.
 1. 🧠 Brainstorming · 2. 💡 Idee & Zielgruppe · 3. 🧩 Funktionen & Umfang · 4. 🎮 Spiel (optional) · 5. 🎨 Design & UX · 6. ⚙️ Technik & Business · 7. 🤖 Prompt an die KI · 8. 🔁 Weiterentwickeln · 9. 🧪 User Testing · 10. 🚀 Go-Live · 11. 🎬 Video
 
-- **Brainstorming (Phase 1):** Idee in Stichworten, Problem, Zielgruppe, Inspiration, Gefühl und grobe Richtung. Ein eigener Prompt lässt die KI ein erstes Konzept erstellen, Rückfragen stellen und technische Funktionen als kopierbare Liste vorschlagen („- Funktion (hoch)“).
+- **Brainstorming (Phase 1) – kreative Spielwiese:**
+  - Die Phase ist breiter als die anderen und startet mit einer **Mindmap** (Idee im Zentrum, sechs Äste mit Zetteln) und einer **Ideen-Wand** (bunte Klebezettel mit Denkanstößen).
+  - Der **Grafik-Baukasten** fügt per Klick weitere Vorlagen als neuen Frame ein: Crazy 8, „Wie könnten wir …?“, SCAMPER, Nutzen-Aufwand-Matrix, Pro & Contra, User Journey, Moodboard (Bildergalerie), Persona, „Was wäre, wenn …?“ und eine freie Fläche. Die Phase wächst mit, die Frames werden neu nummeriert.
+  - Alles, was du in die Grafiken schreibst, fließt automatisch in den **KI-Brainstorming-Prompt**, sortiert nach Grafik.
+  - Die KI liefert ein erstes Konzept, Rückfragen und eine kopierbare Funktionsliste. Optional spinnt sie Ideen weiter, bewertet sie, schlägt ein MVP und Namen vor oder nennt Risiken.
+  - Die Grafiken gibt es auch für jedes andere Board: „Board-Vorlage → Brainstorming-Grafik einfügen …“.
 - **KI-Vorschläge übernehmen:** In jeder Funktionsliste „+ Funktion“ klicken und die Liste einfügen. Aufzählungszeichen werden entfernt und Prioritäten wie „(hoch)“, „(mittel)“, „(niedrig)“ automatisch erkannt.
 - **🤖 KI entscheiden lassen:** Jeder Konzept-Frame hat diesen Schalter neben dem Titel. Der Inhalt wird ausgeblendet, die Frames darunter rücken nach. Im Prompt steht dann, dass die KI diesen Punkt selbst sinnvoll und einfach entscheidet. „Doch selbst festlegen“ holt alles unverändert zurück.
 - **Spiele:** eigener Frame „Story & Kontext“ (Ausgangssituation, Ziel/Konflikt, Setting, Ton & Stimmung, Erzählweise, ausführliche Story). „Figuren & Bilder“ hat eine Bildergalerie: Mit „＋ Bild hinzufügen“ legst du beliebig viele Bilder mit Titel und Erklärung an. Die Erklärungen landen nummeriert im Prompt.
@@ -99,6 +104,11 @@ Für die Planung von Apps, Handyspielen und Web-Apps, die du mit KI baust (z. B.
   - **Zusätzliche Aufgaben**, z. B. Benchmark-Analyse, ergänzende Funktionen vorschlagen, Wettbewerbsfähigkeit einschätzen, klickbaren Prototyp erstellen, Testanleitung schreiben, Code ins Git-Repository pushen (fragt nach dem Link), README, Deployment, DSGVO- und Barrierefreiheits-Check, App-Store-Texte, Ideen für Videotitel und Thumbnail
   - eine Notiz für eigene Anweisungen
 - **KI-Prompt (automatisch):** baut sich live auf aus Rolle, ausgefüllten Notizen, Anforderungen, Farbpalette, priorisierten Funktionen, Referenzbildern, Arbeitsweise und nummerierten Aufgaben. Mit „Kopieren“ landet er in der Zwischenablage.
+### Elemente passen sich dem Text an
+- Haftnotizen, Textfelder und Formen (Rechteck, Kreis, Raute, Formen) wachsen beim Schreiben automatisch in der Höhe mit. Längere Texte werden nie abgeschnitten.
+- Liegt das Element in einem Frame, rückt der Inhalt darunter nach unten und der Frame wird größer. In den Phasen der App-Konzept-Vorlage rücken auch die folgenden Frames nach, die Phase wird länger.
+- Elemente werden nur größer, nie automatisch kleiner. Selbst gewählte Größen bleiben also erhalten.
+
 ### Klickbarer Prototyp auf dem Board (Werkzeug 📱, Taste U)
 - **Importieren:** HTML-Datei hochladen (z. B. den Prototyp aus Claude), Code einfügen oder Beispiel-Prototyp. Der Prototyp läuft live und ist direkt auf dem Board klickbar.
 - **Ansicht:** 📱 Handy, 📲 Tablet oder 🖥️ Desktop. ↻ startet den Prototyp neu.

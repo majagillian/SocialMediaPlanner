@@ -214,7 +214,7 @@ button.chip { border: 1px solid var(--line-2); cursor: pointer; } button.chip:ho
 .wb-viewport[data-tool="note"], .wb-viewport[data-tool="text"], .wb-viewport[data-tool="rect"], .wb-viewport[data-tool="ellipse"], .wb-viewport[data-tool="diamond"] { cursor: crosshair; }
 .wb-viewport[data-tool="connect"] .wb-item { cursor: alias; }
 .wb-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
-.wb-links { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; z-index: 0; }
+.wb-links { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; z-index: 1; /* über Frames, unter den Elementen */ }
 .wb-link { pointer-events: auto; cursor: pointer; }
 .wb-link .hit { stroke: transparent; stroke-width: 14; }
 .wb-link.sel line:not(.hit) { filter: drop-shadow(0 0 3px rgba(124,58,237,.5)); }
@@ -941,3 +941,12 @@ a.btn { text-decoration: none; }
 .frame-aibox b { font-size: 18px; color: var(--violet-d); }
 .frame-aibox span { font-size: 13px; color: var(--ink-2); max-width: 480px; }
 .frame-aibox button { margin-top: 4px; border: 0; background: var(--violet); color: #fff; font-weight: 700; border-radius: 99px; padding: 6px 16px; cursor: pointer; font-size: 13px; }
+
+/* ======================= Brainstorming-Baukasten ======================= */
+.wb-bsmenu { background: #fff; border: 1.5px solid color-mix(in srgb, var(--acc) 35%, transparent); border-radius: 14px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+.bs-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.bs-card { border: 1px solid var(--line); background: #FAFAFC; border-radius: 12px; padding: 10px 12px; text-align: left; cursor: pointer; display: grid; grid-template-columns: 34px 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center; min-height: 92px; transition: transform .12s, border-color .12s, background .12s; }
+.bs-card:hover { border-color: var(--acc); background: color-mix(in srgb, var(--acc) 7%, #fff); transform: translateY(-2px); }
+.bs-card i { font-style: normal; font-size: 26px; grid-row: 1 / 3; }
+.bs-card b { font-size: 14px; color: var(--ink); }
+.bs-card small { font-size: 12px; color: var(--muted); line-height: 1.3; }

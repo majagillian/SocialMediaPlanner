@@ -394,6 +394,7 @@ window.Board = (() => {
       el.onclick = e => { const b = e.target.closest('[data-k]'); if (!b) return; const [n, cs] = PALETTES[b.dataset.k]; pushUndo(); it.name = n; it.colors = cs.map((hx, k) => ({ role: PAL_ROLES[k], hex: hx })); close(); updateVisual(it); refreshSummaries(); scheduleSave(); };
       $('#modal-root').appendChild(el); return;
     }
+    if (a === 'bs-add') return insertBsGraphic(arg);
     if (a === 'gl-add') { pushUndo(); it.entries = [...(it.entries || []), { label: `Bild ${(it.entries || []).length + 1}`, cap: '' }]; updateVisual(it); return scheduleSave(); }
     if (a === 'gl-img') { it._pick = i; replaceImageTarget = it; return $('.wb-file', root).click(); }
     if (a === 'gl-cap') {
@@ -509,6 +510,21 @@ window.Board = (() => {
       if (aiF.length) body.push('', `Bei diesen Punkten entscheidest du selbst, was für diese App sinnvoll ist – halte es einfach und nenne mir kurz deine Entscheidung: ${aiF.join(', ')}.`);
       if (!P2.req.length) body.push('', '(Wähle in den Auswahllisten Optionen aus – sie erscheinen hier automatisch.)');
       lines.push(...body, '', sum?.outro ?? T2.outro);
+      return lines.join('\n');
+    }
+    if (mode === 'brainstorm') {
+      const own = sum && frameOf(sum);
+      const bf = data.items.filter(f => f.type === 'frame' && f.phase === 'brainstorm' && f !== own).sort((a, b) => a.y - b.y || a.x - b.x);
+      const lines = [sum.intro ?? T2.intro];
+      bf.forEach(f => {
+        const P = collectParts(data.items.filter(i => PROMPT_TYPES.includes(i.type) && !i.hint && frameOf(i) === f));
+        const ls = [...P.notes, ...P.gallery.map(e2 => `${e2.label || 'Bild'}${e2.src ? ' (Bild lade ich hoch)' : ''}${e2.cap ? `: ${e2.cap}` : ''}`)];
+        if (ls.length) { lines.push('', `${(f.title || '').replace(/^[\d.]+ · /, '').replace(/^\S+\s/, '')}:`); ls.forEach(l => lines.push(`- ${l.replace(/\n\s*/g, ' ')}`)); }
+      });
+      const P2 = collectParts(own ? data.items.filter(i => i !== sum && PROMPT_TYPES.includes(i.type) && frameOf(i) === own) : []);
+      lines.push(...partsToLines(P2, { reqTitle: 'Grober Rahmen:', tasksTitle: 'Das brauche ich von dir:' }));
+      if (lines.length <= 2) lines.push('', '(Schreib in die Mindmap, auf die Ideen-Wand oder in andere Grafiken – alles erscheint hier automatisch.)');
+      lines.push('', sum.outro ?? T2.outro);
       return lines.join('\n');
     }
     // Phasen-Prompt: nur Inhalte aus dem eigenen Frame + Kurzbeschreibung der App
@@ -726,26 +742,49 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
     updateVisual(it); refreshToc(); scheduleSave();
   }
   /** Auswahllisten wachsen automatisch, falls Optionen nicht hineinpassen (Frame wächst mit) */
+  const FIT_LISTS = ['choice', 'features', 'palette', 'devlog', 'gallery', 'bsmenu'];
+  /** benötigte Höhe eines Textelements (Notiz, Text, Form) für seinen Inhalt */
+  function measureText(it, n) {
+    const tx = $('.wb-text', n); if (!tx || !(tx.textContent || '').trim()) return 0;
+    if (tx.scrollHeight <= tx.clientHeight + 1) return 0; // passt schon – nichts messen
+    const chrome = n.clientHeight - tx.clientHeight;
+    const keep = [tx.style.height, tx.style.display, tx.style.minHeight];
+    tx.style.height = 'auto'; tx.style.display = 'block'; tx.style.minHeight = '0';
+    const ch = tx.scrollHeight;
+    [tx.style.height, tx.style.display, tx.style.minHeight] = keep;
+    const extra = it.type === 'ellipse' ? 1.25 : it.type === 'diamond' || it.type === 'shape' ? 1.35 : 1;
+    return Math.ceil(ch * extra + Math.max(0, chrome) + (it.type === 'text' ? 4 : 6));
+  }
+  /** Platz schaffen: Inhalt darunter im Frame verschieben, Frame und Phase vergrößern */
+  function propagateGrow(it, oldH) {
+    const frame = data.items.find(f => f.type === 'frame' && f !== it && inside({ x: it.x, y: it.y, w: it.w, h: oldH }, f));
+    if (!frame) return;
+    const oldBottom = it.y + oldH, newBottom = it.y + it.h;
+    const below = data.items.filter(o => o !== it && o.type !== 'frame' && o.type !== 'lane' && inside(o, frame) && o.y >= oldBottom - 1);
+    const overl = below.filter(o => o.x < it.x + it.w && o.x + o.w > it.x);
+    if (overl.length) {
+      const shift = Math.max(0, newBottom + 14 - Math.min(...overl.map(o => o.y)));
+      if (shift) below.forEach(o => { o.y += shift; const on = nodeOf(o.id); if (on) place(on, o); });
+    }
+    const kids = data.items.filter(o => o.type !== 'frame' && o.type !== 'lane' && o.x >= frame.x - 1 && o.x + o.w <= frame.x + frame.w + 1 && o.y >= frame.y - 1 && o.y < frame.y + frame.h + 2000 && (inside({ ...o, h: 1 }, frame) || o === it || below.includes(o)));
+    const needBottom = Math.max(...kids.map(o => o.y + o.h)) + 24;
+    const grow = needBottom - (frame.y + frame.h);
+    if (grow <= 0) return;
+    const fOldBottom = frame.y + frame.h; frame.h += grow; const fn = nodeOf(frame.id); if (fn) place(fn, frame);
+    const lane = data.items.find(l => l.type === 'lane' && !l.guide && inside({ ...frame, h: 1 }, l));
+    if (lane) { // Frames darunter in derselben Phase mitschieben, Phase verlängern
+      data.items.filter(o => o !== frame && o.type !== 'lane' && !kids.includes(o) && o.y >= fOldBottom - 1 && o.x >= lane.x && o.x + o.w <= lane.x + lane.w && o.y <= lane.y + lane.h).forEach(o => { o.y += grow; const on = nodeOf(o.id); if (on) place(on, o); });
+      const bottom = Math.max(...data.items.filter(o => o.type === 'frame' && inside(o, { ...lane, h: 1e7 })).map(o => o.y + o.h));
+      if (bottom + 40 > lane.y + lane.h) { lane.h = bottom + 40 - lane.y; const ln = nodeOf(lane.id); if (ln) place(ln, lane); }
+    }
+  }
+  /** Listen und Textelemente wachsen mit ihrem Inhalt (und schieben alles darunter mit) */
   function autoFitChoices(ids) {
     let changed = false;
-    data.items.filter(i => ['choice', 'features', 'palette', 'devlog', 'gallery'].includes(i.type) && (!ids || ids.includes(i.id))).forEach(it => {
-      const n = nodeOf(it.id); if (!n) return;
-      const need = Math.ceil(n.scrollHeight + 2);
-      if (need > it.h + 1) {
-        const grow = need - it.h; const frame = data.items.find(f => f.type === 'frame' && inside(it, f));
-        it.h = need; place(n, it); changed = true;
-        if (frame) { // alles darunter im selben Frame nach unten schieben und Frame vergrößern
-          const lane = data.items.find(l => l.type === 'lane' && !l.guide && inside(frame, l));
-          const oldBottom = frame.y + frame.h;
-          data.items.filter(o => o !== it && o.type !== 'frame' && inside(o, frame) && o.y >= it.y + it.h - grow - 1).forEach(o => { o.y += grow; const on = nodeOf(o.id); if (on) place(on, o); });
-          frame.h += grow; const fn = nodeOf(frame.id); if (fn) place(fn, frame);
-          if (lane) { // Frames darunter in derselben Phase mitschieben, Phase verlängern
-            data.items.filter(o => o !== frame && o.type !== 'lane' && o.y >= oldBottom - 1 && o.x >= lane.x && o.x + o.w <= lane.x + lane.w && o.y <= lane.y + lane.h).forEach(o => { o.y += grow; const on = nodeOf(o.id); if (on) place(on, o); });
-            const bottom = Math.max(...data.items.filter(o => o.type === 'frame' && inside(o, { ...lane, h: 1e7 })).map(o => o.y + o.h));
-            if (bottom + 40 > lane.y + lane.h) { lane.h = bottom + 40 - lane.y; const ln = nodeOf(lane.id); if (ln) place(ln, lane); }
-          }
-        }
-      }
+    data.items.filter(i => (FIT_LISTS.includes(i.type) || TEXTUAL.includes(i.type)) && (!ids || ids.includes(i.id))).forEach(it => {
+      const n = nodeOf(it.id); if (!n || !n.offsetParent) return;
+      const need = FIT_LISTS.includes(it.type) ? Math.ceil(n.scrollHeight + 2) : measureText(it, n);
+      if (need > it.h + 1) { const oldH = it.h; it.h = need; place(n, it); propagateGrow(it, oldH); changed = true; }
     });
     if (changed) { drawLinks(); scheduleSave(); }
   }
@@ -930,6 +969,12 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
           <div class="fx-actions"><button class="fx-add" data-act="pal-choose">${ic('palette', '#7C3AED', 'ic xs')} Farbpalette wählen</button></div>`;
         break;
       }
+      case 'bsmenu': {
+        d.style.setProperty('--acc', it.color || '#C026D3');
+        d.innerHTML = `<div class="ch-head"><span>${esc(it.title || 'Brainstorming-Grafiken')}</span><em>Klicken = als neuen Frame einfügen</em></div>
+          <div class="bs-grid">${Object.entries(BS_GRAPHICS).map(([k, g]) => `<button class="bs-card" data-act="bs-add:${k}" title="${esc(g.desc)}"><i>${g.ic}</i><b>${esc(g.t)}</b><small>${esc(g.desc)}</small></button>`).join('')}</div>`;
+        break;
+      }
       case 'gallery': {
         const es = it.entries || [];
         d.style.setProperty('--acc', it.color || '#DB2777');
@@ -1032,7 +1077,7 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
   function updateVisual(it) {
     const old = nodeOf(it.id); if (!old) return;
     const n = itemEl(it); old.replaceWith(n);
-    if (['choice', 'features', 'palette', 'devlog', 'gallery'].includes(it.type)) autoFitChoices([it.id]);
+    if (FIT_LISTS.includes(it.type) || TEXTUAL.includes(it.type)) autoFitChoices([it.id]);
     if (P.active) applyPresentState(false);
     drawLinks();
   }
@@ -1467,7 +1512,7 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
     if (it.type === 'icon') return openIconPicker(it);
     if (it.type === 'choice') return editChoice(it);
     if (it.type === 'summary') return editSummary(it);
-    if (['features', 'palette', 'imgslot', 'devlog', 'gallery'].includes(it.type)) return; // werden per Einzelklick bedient
+    if (['features', 'palette', 'imgslot', 'devlog', 'gallery', 'bsmenu'].includes(it.type)) return; // werden per Einzelklick bedient
     if (it.type === 'lane') return editLane(it);
     if (it.type === 'image') { replaceImageTarget = it; return $('.wb-file', root).click(); }
     if (TEXTUAL.includes(it.type)) editText(it.id);
@@ -1495,10 +1540,8 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
     else if (opts.initial != null) range.collapse(false);
     const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
     $('.wb-hint', root).textContent = 'Schreiben … · Enter = neue Zeile · Strg+Enter oder Esc = fertig · Klick daneben = fertig';
-    const grow = () => { // Element wächst mit dem Text
-      if (it.type === 'text') { it.h = Math.max(30, Math.ceil(tx.scrollHeight) + 4); node.style.height = it.h + 'px'; }
-      else if (tx.scrollHeight > tx.clientHeight + 2) { it.h = Math.ceil(it.h + (tx.scrollHeight - tx.clientHeight) + 8); node.style.height = it.h + 'px'; }
-      drawLinks(); updateCtxBar();
+    const grow = () => { // Element (und sein Frame) wächst mit dem Text
+      autoFitChoices([it.id]); drawLinks(); updateCtxBar();
     };
     tx.oninput = grow; grow();
     const finish = () => {
@@ -1577,7 +1620,7 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
         <div class="p-row"><button class="pbtn danger" data-p="delete">Löschen</button></div>`;
     } else {
       const type = it.type;
-      const names = { gallery: 'Bilder mit Erklärung', proto: 'Prototyp', lane: 'Phase', devlog: 'Entwicklungsverlauf', features: 'Funktionsliste', palette: 'Farbpalette', imgslot: 'Bild-Platzhalter', choice: 'Auswahlliste', summary: 'KI-Prompt (automatisch)', draw: 'Zeichnung', note: 'Haftnotiz', text: 'Text', rect: 'Rechteck', ellipse: 'Kreis', diamond: 'Raute', shape: SHAPE_DEFS[it.shape]?.[0] || 'Form', icon: 'Icon', image: 'Bild', frame: 'Frame / Folie',
+      const names = { bsmenu: 'Grafik-Baukasten', gallery: 'Bilder mit Erklärung', proto: 'Prototyp', lane: 'Phase', devlog: 'Entwicklungsverlauf', features: 'Funktionsliste', palette: 'Farbpalette', imgslot: 'Bild-Platzhalter', choice: 'Auswahlliste', summary: 'KI-Prompt (automatisch)', draw: 'Zeichnung', note: 'Haftnotiz', text: 'Text', rect: 'Rechteck', ellipse: 'Kreis', diamond: 'Raute', shape: SHAPE_DEFS[it.shape]?.[0] || 'Form', icon: 'Icon', image: 'Bild', frame: 'Frame / Folie',
         embed: EMBEDS[it.kind]?.label || 'Modul', design: DESIGNS[it.kind]?.label || 'Design', html: 'HTML-Visualisierung' };
       html = `<div class="p-title">${names[type]}</div>`;
       // Inhalt
@@ -2573,7 +2616,7 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
   function updateCtxBar() {
     const bar = $('.wb-ctx', root); if (!bar) return;
     const items = selItems();
-    const interactive = items.length === 1 && ['choice', 'features', 'palette', 'imgslot', 'summary', 'devlog', 'lane', 'proto', 'gallery'].includes(items[0].type); // dort würde die Leiste darüberliegende Listen verdecken
+    const interactive = items.length === 1 && ['choice', 'features', 'palette', 'imgslot', 'summary', 'devlog', 'lane', 'proto', 'gallery', 'bsmenu'].includes(items[0].type); // dort würde die Leiste darüberliegende Listen verdecken
     if (!items.length || P.active || drag || tool !== 'select' || interactive) { bar.classList.add('hidden'); return; }
     const one = items.length === 1 ? items[0] : null;
     const key = items.map(i => i.id + (i.locked ? 'L' : '') + i.type).join(',');
@@ -3018,6 +3061,7 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
     const own = getSetting('boardTemplates', []);
     const t = direct || await choose('Board-Vorlage einfügen', [
       { value: 'appconcept', label: 'App-Konzept (Vibe Coding)', desc: 'Frames für Idee, Zielgruppe, Endgerät, Funktionen, Design, UX & UI, Tools … + automatischer KI-Prompt', icon: 'smartphone' },
+      { value: 'bsgraphic', label: 'Brainstorming-Grafik einfügen …', desc: 'Mindmap, Ideen-Wand, Crazy 8, SCAMPER, Matrix, Persona, User Journey, Moodboard …', icon: 'lightbulb' },
       { value: 'iteration', label: 'App-Konzept: neue Weiterentwicklungs-Runde', desc: 'Frame für Fehler, fehlende Funktionen & Verbesserungen mit eigenem Prompt – wird im Verlauf getrackt', icon: 'git-branch-plus' },
       { value: 'lifecycle', label: 'App-Konzept: Verlauf, Testing & Go-Live nachrüsten', desc: 'Für Konzept-Boards, die vor diesem Update angelegt wurden', icon: 'route' },
       { value: 'appblock', label: 'App-Konzept: einzelnen Block einfügen …', desc: 'z. B. „UX & UI“, „KI-Anweisungen“ oder „Spezifische Funktionen“ in ein bestehendes Konzept-Board nachrüsten', icon: 'layout-panel-left' },
@@ -3051,8 +3095,9 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
     const th = { c1: '#7C3AED', c2: '#34D399', bg: '#FFFFFF', ink: '#1F1B2E' };
     const design = (kind, x, y, scale = 1, extra = {}) => { const d = DESIGNS[kind]; return add({ type: 'design', kind, data: { ...d.defaults }, c: { ...th }, x, y, w: Math.round(d.w * scale), h: Math.round(d.h * scale), ...extra }); };
 
-    if (t === 'appconcept') buildAppConcept(add);
-    if (t.startsWith('appblock:')) buildAppConcept(add, t.slice(9));
+    if (t === 'appconcept') buildAppConcept(add, null, link);
+    if (t.startsWith('appblock:')) buildAppConcept(add, t.slice(9), link);
+    if (t === 'bsgraphic') { const k = await choose('Brainstorming-Grafik einfügen', Object.entries(BS_GRAPHICS).map(([key, g]) => ({ value: key, label: `${g.ic} ${g.t}`, desc: g.desc }))); if (k) insertBsGraphic(k); return; }
     if (t === 'pitch') {
       add({ type: 'frame', x: 0, y: 0, w: 960, h: 540, color: '#FFFFFF', title: 'Folie 1 – Titel', order: 1 });
       design('banner', 100, 150, 1, { anim: 'up', step: 1 });
@@ -3118,7 +3163,7 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
   }
 
   // ---------- Vorlage: App-Konzept (Vibe Coding) --------------------------
-  function buildAppConcept(add, onlyBlock) {
+  function buildAppConcept(add, onlyBlock, link = () => {}) {
     const FW = 620, PAD = 24, GAP = 70, COLS = 3;
     // Bezeichnung im KI-Prompt (null = nicht in den Prompt übernehmen)
     const LABELS = { 'Was wird gebaut?': 'App-Typ', 'Für wen?': 'Zielgruppe', 'Technik-Erfahrung der Nutzer': 'Technik-Erfahrung der Nutzer', 'Läuft auf': 'Plattform / Endgeräte', 'Ausrichtung': 'Bildschirm-Ausrichtung',
@@ -3236,7 +3281,7 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
     }
     // ---- Phasen von links nach rechts (Swimlanes) ----
     const PH = [
-      { ic: '🧠', t: 'Brainstorming', sub: 'Idee grob skizzieren – die KI macht ein erstes Konzept, stellt Rückfragen und schlägt Funktionen vor.', c: '#C026D3', b: ['__brain'] },
+      { ic: '🧠', t: 'Brainstorming', sub: 'Deine kreative Spielwiese: frei drauflos denken, skizzieren, sammeln – die KI macht daraus ein erstes Konzept, stellt Rückfragen und schlägt Funktionen vor.', c: '#C026D3', fw: 1100, b: ['__g:mindmap', '__g:wall', '__bsmenu', '__brain'] },
       { ic: '💡', t: 'Idee & Zielgruppe', sub: 'Worum geht es – und für wen bauen wir die App?', c: '#7C3AED', b: ['App-Idee', 'App-Typ', 'Zielgruppe'] },
       { ic: '🧩', t: 'Funktionen & Umfang', sub: 'Was soll die App können – und was kommt in Version 1?', c: '#6366F1', b: ['Endgerät & Plattform', 'Allgemeine Funktionen', 'Spezifische technische Funktionen', 'Umfang & MVP-Plan'] },
       { ic: '🎮', t: 'Spiel', sub: 'Nur ausfüllen, wenn du ein Spiel baust – sonst einfach überspringen.', c: '#DB2777', b: ['Spiel: Mechanik', 'Spiel: Story & Kontext', 'Spiel: Figuren & Bilder'] },
@@ -3254,28 +3299,33 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
     add({ type: 'text', x: 0, y: 0, w: 2400, h: 84, text: 'App-Konzept · Vibe Coding', fs: 64, bold: true, color: '#1F1B2E' });
     add({ type: 'text', x: 0, y: 92, w: 2400, h: 40, text: 'Von der Idee bis zur veröffentlichten App – Phase für Phase von links nach rechts.', fs: 26, color: '#6B6680' });
     add({ type: 'lane', guide: true, x: 0, y: 170, w: 1500, h: 440, c: '#7C3AED', ic: '👋', t: 'So funktioniert die Vorlage', locked: true,
-      steps: ['Optionen anklicken – fertig. „Sonstiges“ für eigene Angaben.', 'Notizen per Doppelklick ausfüllen. Mit „✦ Prompt“ markierte fließen in den Prompt.', 'Klein anfangen? In Phase 1 die Idee grob notieren – die KI macht ein erstes Konzept daraus.', 'Nicht jeder Punkt nötig? „🤖 KI entscheiden lassen“ am Frame blendet ihn aus.', 'In Phase 7 den fertigen Prompt kopieren und ins KI-Tool einfügen.', 'Danach: weiterentwickeln, testen, veröffentlichen – jede Phase hat ihren eigenen Prompt.', 'Navigieren: Konsole unten rechts oder Pfeiltasten – ← → wechselt die Phase, ↑ ↓ den Schritt.'] });
+      steps: ['Optionen anklicken – fertig. „Sonstiges“ für eigene Angaben.', 'Notizen per Doppelklick ausfüllen. Mit „✦ Prompt“ markierte fließen in den Prompt.', 'Phase 1 ist deine kreative Spielwiese: Mindmap, Ideen-Wand und weitere Grafiken – die KI macht ein erstes Konzept daraus.', 'Nicht jeder Punkt nötig? „🤖 KI entscheiden lassen“ am Frame blendet ihn aus.', 'In Phase 7 den fertigen Prompt kopieren und ins KI-Tool einfügen.', 'Danach: weiterentwickeln, testen, veröffentlichen – jede Phase hat ihren eigenen Prompt.', 'Navigieren: Konsole unten rechts oder Pfeiltasten – ← → wechselt die Phase, ↑ ↓ den Schritt.'] });
     const ov = layoutBlocks([{ devlog: true }], 1600, 170, 2600, '#7C3AED', LABELS);
     add({ type: 'frame', x: 1600, y: 170, w: 2600, h: ov.h, color: '#F5F3FF', title: 'Entwicklungsverlauf (Übersicht)', order: 1, phase: 'overview' });
     ov.kids.forEach(k => add(k));
     const top = 170 + Math.max(440, ov.h) + 140;
     const lanes = [];
+    let lx = 0;
     PH.forEach((ph, pi) => {
-      const lx = pi * (LW + LG); let cy = top + HEAD; let k = 0;
+      const fw = ph.fw || FW, lw = fw + LP * 2; let cy = top + HEAD; let k = 0;
       const frame = (title, blocks, extra = {}) => {
-        k++; const lay = layoutBlocks(blocks, lx + LP, cy, FW, ph.c, LABELS);
-        add({ type: 'frame', x: lx + LP, y: cy, w: FW, h: lay.h, color: '#FFFFFF', title: `${pi + 1}.${k} · ${title}`, order: (pi + 1) * 100 + k, ...extra });
+        k++; const lay = layoutBlocks(blocks, lx + LP, cy, fw, ph.c, LABELS);
+        add({ type: 'frame', x: lx + LP, y: cy, w: fw, h: lay.h, color: '#FFFFFF', title: `${pi + 1}.${k} · ${title}`, order: (pi + 1) * 100 + k, ...extra });
         lay.kids.forEach(kd => add(kd)); cy += lay.h + VG;
       };
+      const graphic = key => { k++; const h = placeBsGraphic(key, lx + LP, cy, add, link, { title: `${pi + 1}.${k} · ${BS_GRAPHICS[key].ic} ${BS_GRAPHICS[key].t}`, order: (pi + 1) * 100 + k, phase: 'brainstorm' }); cy += h + VG; };
       ph.b.forEach(name => {
         if (name === '__prompt') frame('KI-Prompt (wird automatisch erstellt)', [{ sum: { mode: 'main', title: 'Dein Prompt für das Vibe-Coding-Tool', h: 820 } }]);
         else if (name === '__iter') frame('Weiterentwicklung #1', iterationBlocks(1), { phase: 'iteration', iterNo: 1, created: today(), order: 701 });
         else if (name === '__test') frame('User Testing', testingBlocks(), { phase: 'testing' });
         else if (name === '__live') frame('Go-Live (Veröffentlichung)', goliveBlocks(), { phase: 'golive' });
-        else if (name === '__brain') frame('Ideen sammeln & KI-Brainstorming', brainstormBlocks(), { phase: 'brainstorm' });
+        else if (name.startsWith('__g:')) graphic(name.slice(4));
+        else if (name === '__bsmenu') frame('🎨 Weitere Brainstorming-Grafiken', [{ bsmenu: true }], { phase: 'brainstorm' });
+        else if (name === '__brain') frame('🤖 KI-Brainstorming', brainstormBlocks(), { phase: 'brainstorm' });
         else frame(name, byName[name], { canAi: true });
       });
-      lanes.push({ type: 'lane', x: lx, y: top, w: LW, h: cy - top - VG + LP, c: ph.c, ic: ph.ic, no: pi + 1, t: ph.t, sub: ph.sub, last: pi === PH.length - 1, locked: true });
+      lanes.push({ type: 'lane', x: lx, y: top, w: lw, h: cy - top - VG + LP, c: ph.c, ic: ph.ic, no: pi + 1, t: ph.t, sub: ph.sub, last: pi === PH.length - 1, locked: true });
+      lx += lw + LG;
     });
     const LH = Math.max(...lanes.map(l => l.h));
     lanes.forEach(l => add({ ...l, h: LH }));
@@ -3296,28 +3346,131 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
         cy += hh + 18; }
       if (b.sum) { kids.push({ type: 'summary', mode: b.sum.mode, title: b.sum.title, x: fx + PAD, y: fy + cy, w: W, h: b.sum.h || 380 }); cy += (b.sum.h || 380) + 18; }
       if (b.gallery) { const n = b.gallery.length; const hh = 60 + Math.ceil((n + 1) / 3) * 228; kids.push({ type: 'gallery', title: 'Bilder mit Erklärung', color, entries: b.gallery.map(l => ({ label: l, cap: '' })), x: fx + PAD, y: fy + cy, w: W, h: hh }); cy += hh + 18; }
+      if (b.bsmenu) { const hh = 70 + Math.ceil(Object.keys(BS_GRAPHICS).length / 4) * 112; kids.push({ type: 'bsmenu', title: 'Weitere Brainstorming-Grafiken', color, x: fx + PAD, y: fy + cy, w: W, h: hh }); cy += hh + 18; }
       if (b.devlog) { kids.push({ type: 'devlog', title: 'Entwicklungsverlauf', x: fx + PAD, y: fy + cy, w: W, h: 260 }); cy += 260 + 18; }
     });
     return { kids, h: cy + PAD - 18 + 8 };
   }
   const STATUS_ITER = ['Geplant', 'In Arbeit', 'Getestet', 'Erledigt'];
+  // ---------- Brainstorming-Grafiken (Vorlagen) ----------------------------
+  const STICKY = ['#FEF9C3', '#FCE7F3', '#D1FAE5', '#E0F2FE', '#EDE9FE', '#FFEDD5'];
+  const bN = (x, y, w, h, ph, color = '#FEF9C3', extra = {}) => ({ type: 'note', x, y, w, h, color, text: ph, ph, fs: 15, align: 'left', promptInclude: true, ...extra });
+  const bL = (x, y, w, h, text, color, extra = {}) => ({ type: 'rect', x, y, w, h, text, color, fillColor: color, fillOpacity: 1, strokeWidth: 0, radius: 14, textColor: '#FFFFFF', fs: 17, bold: true, align: 'center', valign: 'middle', lbl: true, ...extra });
+  const bH = (text, y = 18) => ({ type: 'text', x: 24, y, w: 1052, h: 34, text, fs: 16, color: '#6B6680', hint: true });
+  const BS_GRAPHICS = {
+    mindmap: { ic: '🧠', t: 'Mindmap', desc: 'Idee in die Mitte, Gedanken an die Äste', build() {
+      const it = [bH('Ins Zentrum die Idee, an die Äste alles, was dir einfällt. Neuer Zettel: Doppelklick auf eine freie Stelle.')], ln = [];
+      it.push({ type: 'ellipse', x: 410, y: 330, w: 280, h: 150, text: 'Meine App-Idee:', ph: 'Meine App-Idee:', promptInclude: true, color: '#7C3AED', fillColor: '#7C3AED', fillOpacity: 1, strokeWidth: 0, textColor: '#FFFFFF', fs: 19, bold: true, align: 'center', valign: 'middle' });
+      // [Text, Label-x, Label-y, Farbe, Notizen [[x,y], [x,y]]]
+      const B = [['Welches Problem?', 460, 66, '#EA580C', [[345, 140], [560, 140]]], ['Für wen?', 215, 250, '#DB2777', [[20, 180], [20, 290]]], ['Was ist besonders?', 715, 250, '#0284C7', [[890, 180], [890, 290]]],
+        ['Wie fühlt sie sich an?', 215, 520, '#059669', [[20, 450], [20, 560]]], ['Wo & wann genutzt?', 715, 520, '#D97706', [[890, 450], [890, 560]]], ['Wichtigste Funktionen', 460, 704, '#6366F1', [[345, 594], [560, 594]]]];
+      B.forEach(([t, x, y, c, ns], k) => { const li = it.length; it.push(bL(x, y, 170, 58, t, c, { fs: 15 })); ln.push([1, li]);
+        ns.forEach(([nx, ny], m) => { it.push(bN(nx, ny, 195, 92, `${t.replace('?', '')}:`, STICKY[(k + m) % 6], { fs: 14 })); ln.push([li, it.length - 1]); }); });
+      it[1].x = 410; it[1].y = 335;
+      return { h: 790, items: it, links: ln }; } },
+    wall: { ic: '🗒️', t: 'Ideen-Wand', desc: 'Klebezettel – frei drauflos, ohne Bewertung', build() {
+      const P = ['Verrückteste Idee:', 'Was nervt mich an Apps?', 'Wenn Geld keine Rolle spielt:', 'In 10 Sekunden erklärt:', 'Als Spiel wäre es:', 'Wer würde sie sofort nutzen?', 'Das gibt es so noch nicht:', 'Idee:', 'Idee:', 'Idee:', 'Idee:', 'Idee:'];
+      const it = [bH('Schreib alles auf, was dir einfällt – Quantität vor Qualität. Neue Zettel per Doppelklick auf eine freie Stelle.')];
+      P.forEach((ph, k) => it.push(bN(30 + (k % 4) * 262, 70 + Math.floor(k / 4) * 172, 240, 145, ph, STICKY[k % 6], { rot: [-2, 1.5, -1, 2.5, 1, -2.5][k % 6] })));
+      return { h: 600, items: it, links: [] }; } },
+    crazy8: { ic: '⏱️', t: 'Crazy 8', desc: '8 Varianten in 8 Minuten skizzieren', build() {
+      const it = [bH('8 Minuten, 8 Ideen: Timer oben auf 8 Minuten stellen, pro Feld eine Variante – mit dem Stift (P) skizzieren oder in Worten.')];
+      for (let k = 0; k < 8; k++) it.push({ type: 'rect', x: 24 + (k % 4) * 263, y: 70 + Math.floor(k / 4) * 255, w: 245, h: 235, text: `Idee ${k + 1}:`, ph: `Idee ${k + 1}:`, promptInclude: true, color: '#C084FC', fillColor: '#FFFFFF', fillOpacity: 1, strokeWidth: 2, dashed: true, radius: 14, textColor: '#1F1B2E', fs: 15, align: 'left', valign: 'top', pad: 14 });
+      return { h: 600, items: it, links: [] }; } },
+    hmw: { ic: '❓', t: '„Wie könnten wir …?“', desc: 'Probleme in Chancen verwandeln', build() {
+      const it = [bH('Formuliere Probleme als Chance („Wie könnten wir …?“) und sammle Ideen dazu.')];
+      [['Problem / Beobachtung', '#DC2626', 'Problem:'], ['Wie könnten wir …?', '#7C3AED', 'Wie könnten wir'], ['Ideen dazu', '#059669', 'Idee:']].forEach(([t, c, ph], k) => { it.push(bL(24 + k * 352, 66, 330, 56, t, c)); for (let r = 0; r < 3; r++) it.push(bN(24 + k * 352, 140 + r * 150, 330, 130, ph, STICKY[(k * 2 + r) % 6])); });
+      return { h: 610, items: it, links: [] }; } },
+    scamper: { ic: '🔀', t: 'SCAMPER', desc: '7 Fragen, um eine bestehende Idee zu verändern', build() {
+      const it = [bH('Nimm eine bestehende App oder Idee und verändere sie mit diesen 7 Fragen.')];
+      const C = [['S', 'Ersetzen', 'Was könnte man austauschen?'], ['C', 'Kombinieren', 'Was lässt sich verbinden?'], ['A', 'Anpassen', 'Was kann man von woanders übernehmen?'], ['M', 'Verändern', 'Was größer, kleiner, anders?'], ['P', 'Anders nutzen', 'Wofür noch?'], ['E', 'Weglassen', 'Was kann weg?'], ['R', 'Umdrehen', 'Was passiert umgekehrt?']];
+      const cols = ['#7C3AED', '#DB2777', '#EA580C', '#D97706', '#059669', '#0284C7', '#6366F1'];
+      C.forEach(([l, n, q], k) => { const x = 24 + (k % 4) * 263, y = 66 + Math.floor(k / 4) * 240; it.push(bL(x, y, 245, 50, `${l} · ${n}`, cols[k])); it.push(bN(x, y + 58, 245, 160, `${n} (${q}):`, STICKY[k % 6])); });
+      return { h: 560, items: it, links: [] }; } },
+    matrix: { ic: '🎯', t: 'Nutzen-Aufwand-Matrix', desc: 'Ideen sortieren: Quick Wins finden', build() {
+      const it = [bH('Ideen als Zettel in die Felder ziehen: Was bringt viel und kostet wenig?')];
+      const Q = [['⚡ Quick Wins – viel Nutzen, wenig Aufwand', '#059669', 'Quick Win:'], ['🏗️ Große Projekte – viel Nutzen, viel Aufwand', '#7C3AED', 'Großes Projekt:'], ['🎁 Nice to have – wenig Nutzen, wenig Aufwand', '#0284C7', 'Nice to have:'], ['🚫 Lieber nicht – wenig Nutzen, viel Aufwand', '#EA580C', 'Lieber nicht:']];
+      Q.forEach(([t, c, ph], k) => { const x = 80 + (k % 2) * 505, y = 70 + Math.floor(k / 2) * 305;
+        it.push({ type: 'rect', x, y, w: 495, h: 295, text: t, color: c, fillColor: c, fillOpacity: 0.1, strokeWidth: 2, radius: 16, textColor: c, fs: 16, bold: true, align: 'left', valign: 'top', pad: 14, lbl: true });
+        it.push(bN(x + 20, y + 60, 210, 100, ph, STICKY[k % 6])); it.push(bN(x + 255, y + 60, 210, 100, ph, STICKY[(k + 3) % 6])); });
+      it.push({ type: 'text', x: 0, y: 330, w: 70, h: 120, text: 'Nutzen ↑', fs: 16, bold: true, color: '#6B6680', rot: -90, align: 'center', hint: true });
+      it.push({ type: 'text', x: 80, y: 685, w: 1000, h: 30, text: 'Aufwand →', fs: 16, bold: true, color: '#6B6680', align: 'center', hint: true });
+      return { h: 730, items: it, links: [] }; } },
+    procon: { ic: '⚖️', t: 'Pro & Contra', desc: 'Lohnt sich die Idee?', build() {
+      const it = [bH('Lohnt sich die Idee? Sammle ehrlich Pro und Contra – und zieh ein Fazit.')];
+      it.push(bL(24, 66, 515, 56, 'Pro 👍', '#059669')); it.push(bL(561, 66, 515, 56, 'Contra 👎', '#EA580C'));
+      for (let r = 0; r < 3; r++) { it.push(bN(24, 136 + r * 104, 515, 90, 'Pro:', '#D1FAE5')); it.push(bN(561, 136 + r * 104, 515, 90, 'Contra:', '#FFEDD5')); }
+      it.push(bN(24, 460, 1052, 90, 'Fazit:', '#EDE9FE'));
+      return { h: 580, items: it, links: [] }; } },
+    journey: { ic: '🧭', t: 'User Journey', desc: 'Vom ersten Kontakt bis zum Weiterempfehlen', build() {
+      const it = [bH('Wie erlebt jemand deine App – vom ersten Kontakt bis zum Weiterempfehlen?')], ln = [];
+      const S = ['Entdecken', 'Ausprobieren', 'Regelmäßig nutzen', 'Wiederkommen', 'Weiterempfehlen']; const cols = ['#DB2777', '#EA580C', '#7C3AED', '#0284C7', '#059669'];
+      S.forEach((t, k) => { const x = 24 + k * 212; const li = it.length; it.push(bL(x, 66, 190, 60, `${k + 1}. ${t}`, cols[k])); if (k) ln.push([li - 4, li]);
+        it.push(bN(x, 146, 190, 130, `${t} – was passiert?:`, '#FEF9C3')); it.push(bN(x, 290, 190, 110, `${t} – Gefühl 😀😐😞:`, '#FCE7F3')); it.push(bN(x, 414, 190, 110, `${t} – Chance / Idee:`, '#D1FAE5')); });
+      return { h: 560, items: it, links: ln }; } },
+    moodboard: { ic: '🖼️', t: 'Moodboard', desc: 'Bilder, Farben und Worte für die Stimmung', build() {
+      const it = [bH('Sammle Bilder, Farben und Worte, die die Stimmung deiner App treffen.')];
+      it.push({ type: 'gallery', title: 'Inspiration', color: '#C026D3', entries: [1, 2, 3, 4, 5].map(n => ({ label: `Inspiration ${n}`, cap: '' })), x: 24, y: 60, w: 1052, h: 520 });
+      it.push(bN(24, 600, 340, 100, 'Stimmung in 3 Worten:', '#FAE8FF')); it.push(bN(380, 600, 340, 100, 'Farben, die passen:', '#EDE9FE')); it.push(bN(736, 600, 340, 100, 'Vorbilder (Apps, Spiele, Filme):', '#E0F2FE'));
+      return { h: 720, items: it, links: [] }; } },
+    persona: { ic: '🙋', t: 'Persona', desc: 'Steckbrief einer typischen Nutzerin', build() {
+      const it = [bH('Für wen genau? Beschreibe eine typische Person, die deine App nutzt.')];
+      it.push({ type: 'imgslot', label: 'Foto / Skizze', x: 24, y: 60, w: 260, h: 300 });
+      it.push(bN(300, 60, 370, 90, 'Name, Alter, Beruf:', '#FCE7F3')); it.push(bN(690, 60, 386, 90, 'Typischer Satz von ihr:', '#FCE7F3'));
+      it.push(bN(300, 165, 370, 195, 'Ziele & Wünsche:', '#D1FAE5')); it.push(bN(690, 165, 386, 195, 'Frust & Probleme:', '#FFEDD5'));
+      it.push(bN(24, 378, 520, 120, 'Lieblings-Apps / Spiele:', '#E0F2FE')); it.push(bN(560, 378, 516, 120, 'Wann & wo nutzt sie die App?', '#EDE9FE'));
+      return { h: 525, items: it, links: [] }; } },
+    whatif: { ic: '🤔', t: 'Was wäre, wenn …?', desc: 'Verrückte Szenarien für neue Ideen', build() {
+      const it = [bH('Spiel verrückte Szenarien durch – oft entsteht so die beste Idee.')];
+      const Q = ['es ein Spiel wäre', 'es nur einen einzigen Button gäbe', 'es für Kinder wäre', 'es KI nutzen würde', 'es in einer Woche fertig sein müsste', 'es ohne Internet funktionieren müsste'];
+      const cols = ['#7C3AED', '#DB2777', '#059669', '#0284C7', '#EA580C', '#D97706'];
+      Q.forEach((q, k) => { const x = 24 + (k % 3) * 352, y = 66 + Math.floor(k / 3) * 245; it.push(bL(x, y, 330, 60, `Was wäre, wenn ${q}?`, cols[k], { fs: 15 })); it.push(bN(x, y + 70, 330, 150, `Wenn ${q}:`, STICKY[k % 6])); });
+      return { h: 570, items: it, links: [] }; } },
+    free: { ic: '✏️', t: 'Freie Fläche', desc: 'Leere Leinwand zum Zeichnen und Sammeln', build() {
+      return { h: 700, items: [bH('Freie Fläche: zeichnen (P), Bilder hineinziehen, Zettel per Doppelklick – alles erlaubt.'), bN(24, 70, 260, 150, 'Gedanke:', '#FEF9C3', { rot: -1.5 })], links: [] }; } },
+  };
+  /** Grafik an Position anlegen (für Vorlage und Einfügen) – liefert die Höhe */
+  function placeBsGraphic(key, x, y, addFn, linkFn, frameProps = {}) {
+    const g = BS_GRAPHICS[key]; const b = g.build();
+    addFn({ type: 'frame', x, y, w: 1100, h: b.h, color: '#FFFFFF', title: `${g.ic} ${g.t}`, bsg: key, ...frameProps });
+    const ids = b.items.map(o => addFn({ ...o, x: x + o.x, y: y + o.y }));
+    b.links.forEach(([a2, b2]) => linkFn(ids[a2], ids[b2], '#C4B5FD'));
+    return b.h;
+  }
+  function insertBsGraphic(key) {
+    const lane = data.items.find(l => l.type === 'lane' && !l.guide && data.items.some(f => f.type === 'frame' && f.phase === 'brainstorm' && inside(f, l)));
+    const b = BS_GRAPHICS[key].build(); pushUndo();
+    let x, y, frameProps = {};
+    if (lane) {
+      const fr = navFrames(lane), gr = fr.filter(f => f.bsg); const anchor = gr[gr.length - 1];
+      x = lane.x + 40; y = anchor ? anchor.y + anchor.h + 60 : (fr[0] ? fr[0].y : lane.y + 250);
+      const dy = b.h + 60;
+      data.items.filter(o => o.type !== 'lane' && o.y >= y - 1 && o.x >= lane.x - 1 && o.x + o.w <= lane.x + lane.w + 1).forEach(o => { o.y += dy; });
+      lane.h += dy; frameProps = { phase: 'brainstorm' };
+    } else { const c = viewCenter(); x = Math.round(c.x - 550); y = Math.round(c.y - b.h / 2); }
+    const added = [];
+    placeBsGraphic(key, x, y, o => { const it = { id: uid(), ...o }; added.push(it); return it.id; }, (a2, b2, color) => data.connectors.push({ id: uid(), from: a2, to: b2, color }), frameProps);
+    const frame = added[0]; data.items.unshift(frame); data.items.push(...added.slice(1));
+    if (lane) navFrames(lane).forEach((f, k) => { f.title = `${lane.no}.${k + 1} · ${(f.title || '').replace(/^\d+\.\d+ · /, '')}`; f.order = lane.no * 100 + k + 1; });
+    render(); scheduleSave(); refreshSummaries(); flyTo(frame, 40);
+    toast(`${BS_GRAPHICS[key].t} eingefügt – Doppelklick auf einen Zettel zum Schreiben`);
+  }
   function brainstormBlocks() {
     return [
-      { note: 'Meine Idee in Stichworten (ganz grob reicht):', h: 150, prompt: true, color: '#FAE8FF' },
-      { row: [{ note: 'Welches Problem löst sie / warum macht sie Spaß?', h: 110, prompt: true, color: '#FAE8FF' }, { note: 'Für wen ist sie gedacht?', h: 110, prompt: true, color: '#FAE8FF' }] },
-      { row: [{ note: 'Inspiration / ähnliche Apps oder Spiele:', h: 110, prompt: true, color: '#EDE9FE' }, { note: 'Wie soll sie sich anfühlen? (z. B. schnell, gemütlich, motivierend)', h: 110, prompt: true, color: '#EDE9FE' }] },
+      { note: 'Alles, was du in den Grafiken oben notierst, fließt automatisch in diesen Prompt – egal wie chaotisch. Hier noch letzte Gedanken:', h: 110, prompt: true, color: '#FAE8FF' },
       { ch: ['Grobe Richtung', ['App', 'Spiel', 'Web-Tool', 'Noch offen'], { mode: 'single', cols: 4, label: 'Grobe Richtung' }] },
-      { ch: ['Was soll die KI im Brainstorming liefern?', [
-        { t: 'Erstes Konzept', p: 'Erstelle aus meinen Stichworten ein kompaktes erstes Konzept: Kernidee, Zielgruppe, wichtigste Screens und der Ablauf aus Sicht der Nutzer.' },
+      { ch: ['Was soll die KI liefern?', [
+        { t: 'Erstes Konzept', p: 'Erstelle aus meinen Notizen ein kompaktes erstes Konzept: Kernidee, Zielgruppe, wichtigste Screens und der Ablauf aus Sicht der Nutzer.' },
         { t: 'Rückfragen', p: 'Stelle mir 5–10 gezielte Rückfragen, die für die weitere Planung wichtig sind – nummeriert, damit ich sie leicht beantworten kann.' },
         { t: 'Technische Funktionen vorschlagen', p: 'Schlage technische Funktionen vor – als Liste zum Kopieren, eine Funktion pro Zeile im Format „- Funktion (hoch)“, „(mittel)“ oder „(niedrig)“ für die Priorität. Ich füge die Liste danach in meine Planungsvorlage ein.' },
+        { t: 'Ideen weiterspinnen', p: 'Spinne meine Ideen weiter: 3 überraschende Varianten oder Twists, an die ich noch nicht gedacht habe.' },
+        { t: 'Beste Idee auswählen', p: 'Bewerte die Ideen kurz (Nutzen, Aufwand, Originalität) und empfiehl mir, womit ich starten sollte.' },
         { t: 'MVP-Vorschlag', p: 'Schlage vor, was in eine erste Version (MVP) gehört und was später kommen kann.' },
         { t: 'Namensideen', p: 'Mache 5 Vorschläge für einen Namen.' },
         { t: 'Risiken & Stolpersteine', p: 'Nenne die größten Risiken oder schwierigen Stellen bei der Umsetzung mit Vibe Coding.' },
-        { t: 'Passende Technik', p: 'Empfiehl eine einfache, passende Technik bzw. ein geeignetes Vibe-Coding-Tool.' },
       ], { cols: 1, section: 'tasks', sel: ['Erstes Konzept', 'Rückfragen', 'Technische Funktionen vorschlagen'] }] },
       { note: '💡 So geht’s weiter: Antwort der KI lesen und Rückfragen beantworten. Die vorgeschlagenen Funktionen kopieren → in Phase 3 bei „Spezifische technische Funktionen“ auf „+ Funktion“ klicken und einfügen – Prioritäten in Klammern werden automatisch erkannt.', h: 100, color: '#FFEDD5', np: true },
-      { sum: { mode: 'brainstorm', title: 'Prompt fürs Brainstorming', h: 420 } },
+      { sum: { mode: 'brainstorm', title: 'Prompt fürs Brainstorming', h: 440 } },
     ];
   }
   function iterationBlocks(n) {
