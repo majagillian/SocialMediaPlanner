@@ -68,9 +68,14 @@ Dazu kommen 12 Beitragsvorlagen, eigene Vorlagen und KI-Texte.
 ## Vorlage „App-Konzept (Vibe Coding)“
 Für die Planung von Apps, Handyspielen und Web-Apps, die du mit KI baust (z. B. für YouTube-Videos). Du findest sie unter „Board-Vorlage“ oder beim Anlegen eines neuen Boards („+ Board“ → Vorlage).
 
-**Aufbau in 10 Phasen von links nach rechts:** Jede Phase ist eine farbige Spalte mit großem Kopf (Nummer, Emoji, Titel und ein Satz Erklärung, ideal auch für Zuschauer im Video). Pfeile zwischen den Köpfen zeigen den Weg.
-1. 💡 Idee & Zielgruppe · 2. 🧩 Funktionen & Umfang · 3. 🎮 Spiel (optional) · 4. 🎨 Design & UX · 5. ⚙️ Technik & Business · 6. 🤖 Prompt an die KI · 7. 🔁 Weiterentwickeln · 8. 🧪 User Testing · 9. 🚀 Go-Live · 10. 🎬 Video
+**Aufbau in 11 Phasen von links nach rechts:** Jede Phase ist eine farbige Spalte mit großem Kopf (Nummer, Emoji, Titel und ein Satz Erklärung, ideal auch für Zuschauer im Video). Pfeile zwischen den Köpfen zeigen den Weg.
+1. 🧠 Brainstorming · 2. 💡 Idee & Zielgruppe · 3. 🧩 Funktionen & Umfang · 4. 🎮 Spiel (optional) · 5. 🎨 Design & UX · 6. ⚙️ Technik & Business · 7. 🤖 Prompt an die KI · 8. 🔁 Weiterentwickeln · 9. 🧪 User Testing · 10. 🚀 Go-Live · 11. 🎬 Video
 
+- **Brainstorming (Phase 1):** Idee in Stichworten, Problem, Zielgruppe, Inspiration, Gefühl und grobe Richtung. Ein eigener Prompt lässt die KI ein erstes Konzept erstellen, Rückfragen stellen und technische Funktionen als kopierbare Liste vorschlagen („- Funktion (hoch)“).
+- **KI-Vorschläge übernehmen:** In jeder Funktionsliste „+ Funktion“ klicken und die Liste einfügen. Aufzählungszeichen werden entfernt und Prioritäten wie „(hoch)“, „(mittel)“, „(niedrig)“ automatisch erkannt.
+- **🤖 KI entscheiden lassen:** Jeder Konzept-Frame hat diesen Schalter neben dem Titel. Der Inhalt wird ausgeblendet, die Frames darunter rücken nach. Im Prompt steht dann, dass die KI diesen Punkt selbst sinnvoll und einfach entscheidet. „Doch selbst festlegen“ holt alles unverändert zurück.
+- **Spiele:** eigener Frame „Story & Kontext“ (Ausgangssituation, Ziel/Konflikt, Setting, Ton & Stimmung, Erzählweise, ausführliche Story). „Figuren & Bilder“ hat eine Bildergalerie: Mit „＋ Bild hinzufügen“ legst du beliebig viele Bilder mit Titel und Erklärung an. Die Erklärungen landen nummeriert im Prompt.
+- **Weiterentwicklung:** Die Rolle der KI ist pro Runde wählbar (z. B. UX/UI-Designer, Game-Designer, QA, Performance, Barrierefreiheit, Security oder eigene Rolle). Die Rolle steht dann am Anfang des Prompts der Runde.
 - Frames sind pro Phase nummeriert (1.1, 1.2 …) und in der Farbe ihrer Phase gehalten.
 - Oben stehen eine Kurzanleitung und der Entwicklungsverlauf.
 - Das **Inhaltsverzeichnis** gruppiert die Frames nach Phasen. Ein Klick auf eine Phase zoomt auf ihren Anfang.
@@ -79,7 +84,7 @@ Für die Planung von Apps, Handyspielen und Web-Apps, die du mit KI baust (z. B.
   - Steuerkreuz: ▶/◀ wechselt die Phase, ▼/▲ geht Schritt für Schritt durch die Frames. ▼ am Ende einer Phase springt automatisch zur nächsten, ⌂ führt zum Anfang.
   - Zeigt an, wo du gerade bist („Phase 2 von 10 · Schritt 3/4“). Phasen-Punkte und Schritt-Nummern sind anklickbar.
   - Die Anzeige folgt auch, wenn du selbst verschiebst oder zoomst. Einklappbar, damit sie im Video nicht stört.
-  - Tastatur: Pfeiltasten (wenn nichts ausgewählt ist) oder immer mit Alt + Pfeiltasten.
+  - Tastatur: Pfeiltasten (wenn nichts ausgewählt ist) oder immer mit Alt + Pfeiltasten – auch wenn die Konsole ausgeblendet ist.
   - Die runden Pfeile zwischen den Phasenköpfen sind klickbar und springen zur nächsten Phase.
 - Neue Weiterentwicklungs-Runden erscheinen untereinander in Phase 7. Die Spalte wächst automatisch mit.
 

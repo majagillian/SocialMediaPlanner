@@ -915,3 +915,29 @@ a.btn { text-decoration: none; }
 .wb-proto.busy .pr-busy { display: flex; }
 .pr-busy span { width: 38px; height: 38px; border-radius: 50%; border: 4px solid rgba(255,255,255,.3); border-top-color: var(--mint); animation: prspin 1s linear infinite; }
 @keyframes prspin { to { transform: rotate(360deg); } }
+
+/* ======================= Bilder mit Erklärung ======================= */
+.wb-gallery { background: #fff; border: 1.5px solid color-mix(in srgb, var(--acc) 35%, transparent); border-radius: 14px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+.gl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.gl-card { position: relative; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; background: #FAFAFC; }
+.gl-img { height: 140px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; cursor: pointer; background: repeating-linear-gradient(45deg, #F5F3FF, #F5F3FF 10px, #fff 10px, #fff 20px); color: var(--muted); font-size: 12px; font-weight: 600; }
+.gl-img:hover { outline: 2px solid var(--acc); outline-offset: -2px; }
+.gl-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gl-cap { padding: 8px 10px 10px; cursor: text; display: flex; flex-direction: column; gap: 2px; min-height: 64px; }
+.gl-cap b { font-size: 13px; } .gl-cap span { font-size: 12px; color: var(--ink-2); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.gl-cap span.ph { color: var(--muted); font-style: italic; }
+.gl-cap:hover { background: var(--violet-xl); }
+.gl-del { position: absolute; top: 6px; right: 6px; z-index: 1; width: 22px; height: 22px; border-radius: 50%; border: 0; background: rgba(31,27,46,.6); color: #fff; cursor: pointer; font-size: 14px; line-height: 1; opacity: 0; transition: opacity .15s; }
+.gl-card:hover .gl-del { opacity: 1; }
+.gl-add { border: 2px dashed color-mix(in srgb, var(--acc) 45%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--acc) 5%, #fff); color: var(--acc); font-size: 34px; font-weight: 300; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 214px; }
+.gl-add span { font-size: 13px; font-weight: 700; }
+.gl-add:hover { background: color-mix(in srgb, var(--acc) 12%, #fff); }
+
+/* ======================= KI entscheiden lassen ======================= */
+.frame-ai { margin-left: 8px; border: 1px solid var(--line-2); background: #fff; border-radius: 99px; padding: 1px 10px; font-size: 11.5px; font-weight: 700; color: var(--ink-2); cursor: pointer; white-space: nowrap; }
+.frame-ai:hover { border-color: var(--violet); color: var(--violet); }
+.frame-ai.on { background: var(--violet); border-color: var(--violet); color: #fff; }
+.frame-aibox { position: absolute; inset: 14px; border: 2px dashed #C4B5FD; border-radius: 12px; background: var(--violet-xl); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; padding: 10px 20px; }
+.frame-aibox b { font-size: 18px; color: var(--violet-d); }
+.frame-aibox span { font-size: 13px; color: var(--ink-2); max-width: 480px; }
+.frame-aibox button { margin-top: 4px; border: 0; background: var(--violet); color: #fff; font-weight: 700; border-radius: 99px; padding: 6px 16px; cursor: pointer; font-size: 13px; }

@@ -346,6 +346,13 @@ window.Board = (() => {
     ['Cyberpunk', ['#FDE047', '#06B6D4', '#E11D48', '#09090B', '#FAFAFA']], ['Gaming Dark', ['#22C55E', '#6366F1', '#F43F5E', '#111827', '#F9FAFB']],
   ];
   const PAL_ROLES = ['Primär', 'Sekundär', 'Akzent', 'Hintergrund', 'Text'];
+  /** „- Spielstand speichern (hoch)“ → { t, prio } */
+  function parseFeatureLine(line) {
+    let t = line.replace(/\*\*/g, '').replace(/^\s*(?:[-•*–]|\d+[.)])\s*/, '').trim(); if (!t || (/:$/.test(t) && t.length < 40)) return null;
+    let prio = null; const m = t.match(/\s*[(\[]\s*(?:Priorität:?\s*)?(hoch|mittel|niedrig)\s*[)\]]\s*$/i) || t.match(/\s+[–—-]\s*(?:Priorität:?\s*)?(hoch|mittel|niedrig)\s*$/i);
+    if (m) { prio = m[1].toLowerCase(); t = t.slice(0, m.index).trim(); }
+    return t ? { t, prio } : null;
+  }
   async function itemAction(it, act, pt) {
     const [a, arg] = act.split(':'); const i = Number(arg);
     if (a.startsWith('pr-')) return protoAction(it, a, arg, pt);
@@ -358,10 +365,10 @@ window.Board = (() => {
     if (a === 'fx-add' || a === 'fx-edit') {
       const r = a === 'fx-edit' ? it.rows[i] : null;
       const v = await openForm({ title: r ? 'Funktion bearbeiten' : 'Technische Funktionen hinzufügen', submitLabel: r ? 'Übernehmen' : 'Hinzufügen', values: { t: r?.t || '', prio: r?.prio || 'mittel' },
-        extra: r ? '' : '<p class="muted small" style="margin:-6px 0 12px">Mehrere Funktionen auf einmal: eine pro Zeile. Möglichst konkret, z. B. „Spielstand wird automatisch in der Cloud gespeichert“.</p>',
+        extra: r ? '' : '<p class="muted small" style="margin:-6px 0 12px">Mehrere Funktionen auf einmal: eine pro Zeile – du kannst die Liste aus der KI-Antwort (Brainstorming) direkt einfügen. Prioritäten wie „(hoch)“ am Zeilenende werden automatisch erkannt.</p>',
         fields: [{ key: 't', label: r ? 'Funktion' : 'Funktion(en)', type: r ? 'text' : 'textarea', rows: 4, required: true }, { key: 'prio', label: 'Priorität', type: 'select', options: [['hoch', 'Hoch – unverzichtbar'], ['mittel', 'Mittel – wichtig'], ['niedrig', 'Niedrig – nice to have']] }] });
       if (!v) return; pushUndo();
-      if (r) { r.t = v.t.trim(); r.prio = v.prio; } else v.t.split('\n').map(x => x.trim()).filter(Boolean).forEach(t => it.rows.push({ t, prio: v.prio }));
+      if (r) { r.t = v.t.trim(); r.prio = v.prio; } else v.t.split('\n').map(parseFeatureLine).filter(Boolean).forEach(x => it.rows.push({ t: x.t, prio: x.prio || v.prio }));
       updateVisual(it); refreshSummaries(); return scheduleSave();
     }
     if (a === 'fx-prio') { pushUndo(); const order = ['hoch', 'mittel', 'niedrig']; const r = it.rows[i]; r.prio = order[(order.indexOf(r.prio || 'mittel') + 1) % 3]; updateVisual(it); refreshSummaries(); return scheduleSave(); }
@@ -387,6 +394,16 @@ window.Board = (() => {
       el.onclick = e => { const b = e.target.closest('[data-k]'); if (!b) return; const [n, cs] = PALETTES[b.dataset.k]; pushUndo(); it.name = n; it.colors = cs.map((hx, k) => ({ role: PAL_ROLES[k], hex: hx })); close(); updateVisual(it); refreshSummaries(); scheduleSave(); };
       $('#modal-root').appendChild(el); return;
     }
+    if (a === 'gl-add') { pushUndo(); it.entries = [...(it.entries || []), { label: `Bild ${(it.entries || []).length + 1}`, cap: '' }]; updateVisual(it); return scheduleSave(); }
+    if (a === 'gl-img') { it._pick = i; replaceImageTarget = it; return $('.wb-file', root).click(); }
+    if (a === 'gl-cap') {
+      const e2 = it.entries[i]; if (!e2) return;
+      const v = await openForm({ title: 'Bild beschreiben', submitLabel: 'Übernehmen', values: { label: e2.label || '', cap: e2.cap || '' }, fields: [
+        { key: 'label', label: 'Titel (z. B. „Hauptfigur“, „Level 2“, „Gegner: Schleimmonster“)', required: true },
+        { key: 'cap', label: 'Erklärung – was soll die KI daraus übernehmen?', type: 'textarea', rows: 4, placeholder: 'z. B. „So soll die Hauptfigur aussehen: runder Roboter, Neon-Farben, kann doppelt springen“' }] });
+      if (!v) return; pushUndo(); e2.label = v.label.trim(); e2.cap = v.cap.trim(); updateVisual(it); refreshSummaries(); return scheduleSave();
+    }
+    if (a === 'gl-del') { pushUndo(); it.entries.splice(i, 1); updateVisual(it); refreshSummaries(); return scheduleSave(); }
     if (a === 'slot-pick') { replaceImageTarget = it; return $('.wb-file', root).click(); }
   }
 
@@ -399,7 +416,7 @@ window.Board = (() => {
   // ---------- Prompt-Bausteine ---------------------------------------------
   const frameOf = it => { const cx = it.x + it.w / 2, cy = it.y + it.h / 2; return data.items.find(f => f.type === 'frame' && f !== it && cx >= f.x && cx <= f.x + f.w && cy >= f.y && cy <= f.y + f.h); };
   const inPhase = it => !!frameOf(it)?.phase;
-  const PROMPT_TYPES = ['choice', 'note', 'text', 'features', 'palette', 'image', 'rect', 'ellipse', 'diamond', 'shape'];
+  const PROMPT_TYPES = ['choice', 'note', 'text', 'features', 'palette', 'image', 'gallery', 'rect', 'ellipse', 'diamond', 'shape'];
   const optText = o => o.val ? `${o.t} (${o.val})` : o.t;
   const picked = c => [...(c.options || []).filter(o => o.on), ...(c.other && (c.otherText || '').trim() ? [{ t: c.otherText.trim(), p: c.otherText.trim() }] : [])];
   function noteLine(n) {
@@ -424,21 +441,27 @@ window.Board = (() => {
     const o = { hoch: 0, mittel: 1, niedrig: 2 };
     parts.features = ord.filter(i => i.type === 'features' && !i.noPrompt).map(fx => ({ title: fx.label || fx.title || 'Funktionen', rows: [...(fx.rows || [])].filter(r => !r.done).sort((a, b) => o[a.prio || 'mittel'] - o[b.prio || 'mittel']) })).filter(f => f.rows.length);
     parts.refs = ord.filter(i => i.type === 'image' && i.refImage);
+    parts.gallery = ord.filter(i => i.type === 'gallery' && !i.noPrompt).flatMap(g => (g.entries || []).filter(e2 => e2.src || e2.cap).map(e2 => ({ ...e2, g })));
     parts.work = choices.filter(c => c.section === 'work' && !c.noPrompt).flatMap(c => picked(c).map(op => (op.p || `${c.label || c.title}: ${op.t}`).replace('{val}', op.val || '')));
     parts.tasks = choices.filter(c => c.section === 'tasks' && !c.noPrompt).flatMap(c => picked(c).map(op => (op.p || op.t).replace('{val}', op.val || '(Link fehlt – bitte ergänzen)')));
     ord.filter(i => i.type === 'note' && i.taskNote && (i.text || '').trim() && (!i.ph || i.text.trim() !== i.ph.trim()))
       .forEach(n => n.text.split('\n').map(l => l.replace(/^[•\-–*]\s*/, '').trim()).filter(l => l && !/:$/.test(l)).forEach(l => parts.tasks.push(l)));
     return parts;
   }
-  function partsToLines(P2, { reqTitle = 'Anforderungen:', refText } = {}) {
+  function partsToLines(P2, { reqTitle = 'Anforderungen:', refText, tasksTitle } = {}) {
     const lines = [];
     if (P2.notes.length) { lines.push(''); P2.notes.forEach(l => lines.push(l)); }
     if (P2.req.length) { lines.push('', reqTitle); P2.req.forEach(([t, l]) => lines.push(`- ${t}: ${l.join(', ')}`)); }
     P2.have.forEach(hv => { if (hv.yes.length) lines.push(`- Bereits vorhanden: ${hv.yes.join(', ')}`); if (hv.no.length) lines.push(`- Noch nicht vorhanden: ${hv.no.join(', ')}`); });
     P2.features.forEach(f => { lines.push('', `${f.title} (nach Priorität):`); f.rows.forEach(r => lines.push(`- [${(r.prio || 'mittel').toUpperCase()}] ${r.t}`)); });
     if (P2.refs.length) lines.push('', (refText || 'Referenzbilder: Ich lade dir zusätzlich {n} hoch ({list}). Orientiere dich bei Stil, Figuren und Setting daran.').replace('{n}', `${P2.refs.length} Bild${P2.refs.length > 1 ? 'er' : ''}`).replace('{list}', P2.refs.map(r => r.caption || 'Bild').join(', ')));
+    if (P2.gallery.length) {
+      const withImg = P2.gallery.filter(e2 => e2.src).length;
+      lines.push('', withImg === 1 ? 'Bilder mit Erklärung (das Bild lade ich dir zusätzlich hoch):' : withImg ? `Bilder mit Erklärung (ich lade dir die ${withImg} Bilder zusätzlich hoch, in dieser Reihenfolge):` : 'Beschreibungen zu Figuren & Welt:');
+      P2.gallery.forEach((e2, k) => lines.push(`${k + 1}. ${e2.label || 'Bild'}${e2.src ? '' : ' (ohne Bild)'}${e2.cap ? `: ${e2.cap}` : ''}`));
+    }
     if (P2.work.length) { lines.push('', 'Arbeitsweise:'); P2.work.forEach(w => lines.push(`- ${w}`)); }
-    if (P2.tasks.length) { lines.push('', 'Zusätzliche Aufgaben für dich:'); P2.tasks.forEach((t2, k) => lines.push(`${k + 1}. ${t2}`)); }
+    if (P2.tasks.length) { lines.push('', tasksTitle || 'Zusätzliche Aufgaben für dich:'); P2.tasks.forEach((t2, k) => lines.push(`${k + 1}. ${t2}`)); }
     return lines;
   }
   /** Kurzbeschreibung der App aus dem Konzept (für Folge-Prompts) */
@@ -460,6 +483,10 @@ window.Board = (() => {
       intro: 'Wir entwickeln meine App{name} weiter. Ich habe die aktuelle Version getestet ({round}) und möchte die folgenden Punkte umsetzen.',
       outro: 'Gehe so vor: Analysiere zuerst die Ursachen der Fehler, ändere dann gezielt nur die betroffenen Stellen (bestehende Funktionen bitte nicht kaputt machen) und gib mir am Ende eine Liste aller Änderungen (Changelog) sowie konkrete Schritte, wie ich die neue Version testen kann.',
     },
+    brainstorm: {
+      intro: 'Ich habe eine erste, noch grobe Idee für eine App und möchte sie mit dir ausarbeiten. Hier sind meine Stichworte:',
+      outro: 'Antworte strukturiert mit Überschriften. Wo dir Angaben fehlen, triff eine plausible Annahme und kennzeichne sie als „Annahme“. Schreib noch keinen Code – es geht erst um das Konzept.',
+    },
     testing: {
       intro: 'Ich möchte meine App{name} mit echten Nutzern testen (User Testing).',
       outro: 'Erstelle mir einen konkreten Testplan mit Testaufgaben, einen kurzen Fragebogen für die Tester (inkl. Bewertungsskala) und eine Vorlage, mit der ich das Feedback auswerten und als priorisierte To-do-Liste für die nächste Weiterentwicklung nutzen kann.',
@@ -478,6 +505,8 @@ window.Board = (() => {
       const intro = sum?.intro ?? T2.intro;
       lines.push(P2.role ? intro.replace(/erfahrener Software-Entwickler|erfahrene[rn]? [^.]*?(?=\. )/, picked(P2.role).map(optText).join(' und ')) : intro);
       const body = partsToLines(P2);
+      const aiF = data.items.filter(f => f.type === 'frame' && f.aiDecides && !f.phase && !inPhase(f)).map(f => (f.title || '').replace(/^[\d.]+ · /, ''));
+      if (aiF.length) body.push('', `Bei diesen Punkten entscheidest du selbst, was für diese App sinnvoll ist – halte es einfach und nenne mir kurz deine Entscheidung: ${aiF.join(', ')}.`);
       if (!P2.req.length) body.push('', '(Wähle in den Auswahllisten Optionen aus – sie erscheinen hier automatisch.)');
       lines.push(...body, '', sum?.outro ?? T2.outro);
       return lines.join('\n');
@@ -488,9 +517,12 @@ window.Board = (() => {
     const P2 = collectParts(items);
     const { name, ctx } = appContext();
     const round = frame?.iterNo ? `Weiterentwicklung #${frame.iterNo}` : 'aktueller Stand';
-    const lines = [(sum.intro ?? T2.intro).replace('{name}', name ? ` „${name}“` : '').replace('{round}', round)];
-    if (ctx) lines.push('', ctx);
-    lines.push(...partsToLines(P2, { reqTitle: mode === 'golive' ? 'Meine Angaben zur Veröffentlichung:' : mode === 'testing' ? 'Rahmen für den Test:' : 'Rahmen dieser Runde:',
+    const lines = [];
+    const roleOpt = P2.role && picked(P2.role).filter(o => !/Wie im Hauptprompt/.test(o.t));
+    if (roleOpt && roleOpt.length) lines.push(`Du bist in dieser Runde ${roleOpt.map(o => o.p || o.t).join(' und ')}. Konzentriere dich besonders auf dein Fachgebiet.`);
+    lines.push((sum.intro ?? T2.intro).replace('{name}', name ? ` „${name}“` : '').replace('{round}', round));
+    if (ctx && mode !== 'brainstorm') lines.push('', ctx);
+    lines.push(...partsToLines(P2, { reqTitle: mode === 'golive' ? 'Meine Angaben zur Veröffentlichung:' : mode === 'testing' ? 'Rahmen für den Test:' : mode === 'brainstorm' ? 'Grober Rahmen:' : 'Rahmen dieser Runde:', tasksTitle: mode === 'brainstorm' ? 'Das brauche ich von dir:' : undefined,
       refText: mode === 'iteration' ? 'Screenshots: Ich lade dir zusätzlich {n} hoch ({list}), die die Probleme zeigen.' : undefined }));
     if (lines.length <= 3) lines.push('', '(Fülle die Listen und Notizen in diesem Frame aus – sie erscheinen hier automatisch.)');
     lines.push('', sum.outro ?? T2.outro);
@@ -658,6 +690,30 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
     updateVisual(list); refreshProto(it); refreshSummaries(); scheduleSave();
     toast(`${pins.length} Punkt${pins.length === 1 ? '' : 'e'} in „${list.title}“ übernommen – der Prompt der Runde ist aktualisiert`);
   }
+  /** Frame der KI überlassen: Inhalt wird ausgeblendet (im Frame gespeichert), Frames darunter rücken nach */
+  function shiftBelow(f, oldBottom, delta) {
+    const lane = data.items.find(l => l.type === 'lane' && !l.guide && inside(f, l));
+    const x0 = lane ? lane.x : f.x, x1 = lane ? lane.x + lane.w : f.x + f.w;
+    data.items.filter(o => o !== f && o.type !== 'lane' && o.y >= oldBottom - 1 && o.x >= x0 - 1 && o.x + o.w <= x1 + 1 && (!lane || o.y <= lane.y + lane.h)).forEach(o => { o.y += delta; });
+    if (lane && delta > 0) { const bottom = Math.max(...data.items.filter(o => o.type === 'frame' && o.x >= lane.x && o.x + o.w <= lane.x + lane.w && o.y >= lane.y).map(o => o.y + o.h)); if (bottom + 40 > lane.y + lane.h) lane.h = bottom + 40 - lane.y; }
+  }
+  function toggleFrameAi(f) {
+    if (!f) return; pushUndo();
+    if (!f.aiDecides) {
+      const kids = data.items.filter(c => c.type !== 'frame' && c.type !== 'lane' && inside(c, f));
+      f.stash = kids.map(k => ({ ...k, dx: k.x - f.x, dy: k.y - f.y }));
+      data.items = data.items.filter(c => !kids.includes(c));
+      const oldBottom = f.y + f.h; f.hFull = f.h; f.h = 170; f.aiDecides = true;
+      shiftBelow(f, oldBottom, f.h - f.hFull);
+      toast('Ausgeblendet – die KI entscheidet diesen Punkt selbst');
+    } else {
+      const oldBottom = f.y + f.h; const full = f.hFull || f.h;
+      shiftBelow(f, oldBottom, full - f.h); f.h = full; f.aiDecides = false;
+      (f.stash || []).forEach(k => { const { dx, dy, ...it } = k; it.x = f.x + dx; it.y = f.y + dy; data.items.push(it); });
+      delete f.stash; delete f.hFull;
+    }
+    render(); scheduleSave(); refreshSummaries();
+  }
   async function editLane(it) {
     const v = await openForm({ title: it.guide ? 'Hinweisbox bearbeiten' : 'Phase bearbeiten', values: { ic: it.ic || '', t: it.t || '', sub: it.sub || '', steps: (it.steps || []).join('\n'), c: it.c || '#7C3AED' }, fields: [
       { key: 'ic', label: 'Emoji', half: true }, { key: 'c', label: 'Farbe (Hex)', half: true },
@@ -672,7 +728,7 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
   /** Auswahllisten wachsen automatisch, falls Optionen nicht hineinpassen (Frame wächst mit) */
   function autoFitChoices(ids) {
     let changed = false;
-    data.items.filter(i => ['choice', 'features', 'palette', 'devlog'].includes(i.type) && (!ids || ids.includes(i.id))).forEach(it => {
+    data.items.filter(i => ['choice', 'features', 'palette', 'devlog', 'gallery'].includes(i.type) && (!ids || ids.includes(i.id))).forEach(it => {
       const n = nodeOf(it.id); if (!n) return;
       const need = Math.ceil(n.scrollHeight + 2);
       if (need > it.h + 1) {
@@ -874,6 +930,16 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
           <div class="fx-actions"><button class="fx-add" data-act="pal-choose">${ic('palette', '#7C3AED', 'ic xs')} Farbpalette wählen</button></div>`;
         break;
       }
+      case 'gallery': {
+        const es = it.entries || [];
+        d.style.setProperty('--acc', it.color || '#DB2777');
+        d.innerHTML = `<div class="ch-head"><span>${esc(it.title || 'Bilder mit Erklärung')}</span><em>${es.filter(e2 => e2.src).length} von ${es.length} mit Bild</em></div>
+          <div class="gl-grid">${es.map((e2, k) => `<div class="gl-card"><button class="gl-del" data-act="gl-del:${k}" title="Entfernen">×</button>
+            <div class="gl-img" data-act="gl-img:${k}" title="${e2.src ? 'Bild ersetzen' : 'Bild auswählen'}">${e2.src ? `<img src="${e2.src}" alt="">` : `${ic('image-plus', '#8A85A0', 'ic')}<span>Bild wählen</span>`}</div>
+            <div class="gl-cap" data-act="gl-cap:${k}" title="Titel & Erklärung bearbeiten"><b>${esc(e2.label || `Bild ${k + 1}`)}</b><span class="${e2.cap ? '' : 'ph'}">${esc(e2.cap || 'Erklärung hinzufügen …')}</span></div></div>`).join('')}
+            <button class="gl-add" data-act="gl-add" title="Weiteres Bild mit Erklärung">＋<span>Bild hinzufügen</span></button></div>`;
+        break;
+      }
       case 'proto': {
         const dev = it.device || 'phone';
         d.classList.toggle('commenting', !!it._cm);
@@ -925,8 +991,9 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
         d.style.background = it.color || '#FFFFFF';
         const sp = it.preset && SOCIAL_PRESETS.find(x => x.key === it.preset);
         d.innerHTML = `<div class="frame-title">${ic(sp ? sp.icon : 'frame', '#8A85A0', 'ic xs')} ${esc(it.title || 'Frame')}${it.export ? ` <em>${it.export.w}×${it.export.h}</em>` : ''}
-          <button class="frame-btn" data-frame-export title="Als Bild exportieren">${ic('download', '#7C3AED', 'ic xs')}</button></div>
-          ${it.safe && it.showSafe !== false ? `<div class="safe-zone sz-${it.safe}"></div>` : ''}`;
+          <button class="frame-btn" data-frame-export title="Als Bild exportieren">${ic('download', '#7C3AED', 'ic xs')}</button>${it.canAi ? `<button class="frame-ai ${it.aiDecides ? 'on' : ''}" data-frame-ai title="${it.aiDecides ? 'Wieder selbst festlegen' : 'Diesen Punkt der KI überlassen und ausblenden'}">🤖 ${it.aiDecides ? 'KI entscheidet' : 'KI entscheiden lassen'}</button>` : ''}</div>
+          ${it.safe && it.showSafe !== false ? `<div class="safe-zone sz-${it.safe}"></div>` : ''}
+          ${it.aiDecides ? `<div class="frame-aibox"><b>🤖 Die KI entscheidet hier selbst</b><span>Der Punkt ist ausgeblendet. Im Prompt steht, dass die KI hier eine sinnvolle, einfache Lösung wählt.</span><button data-frame-ai>Doch selbst festlegen</button></div>` : ''}`;
         break;
       }
       case 'design': {
@@ -965,7 +1032,7 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
   function updateVisual(it) {
     const old = nodeOf(it.id); if (!old) return;
     const n = itemEl(it); old.replaceWith(n);
-    if (['choice', 'features', 'palette', 'devlog'].includes(it.type)) autoFitChoices([it.id]);
+    if (['choice', 'features', 'palette', 'devlog', 'gallery'].includes(it.type)) autoFitChoices([it.id]);
     if (P.active) applyPresentState(false);
     drawLinks();
   }
@@ -1186,6 +1253,7 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
       if (e.ctrlKey || !e.shiftKey) zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)));
       else { data.view.x -= e.deltaY; applyView(); scheduleSave(); }
     }, { passive: false });
+    viewport.addEventListener('pointerdown', e => { const b = e.target.closest('[data-frame-ai]'); if (!b || e.button) return; e.stopPropagation(); e.preventDefault(); toggleFrameAi(find(b.closest('.wb-item').dataset.id)); }, true);
     viewport.addEventListener('pointerdown', e => { const a = e.target.closest('.lane-arrow'); if (!a) return; e.stopPropagation(); e.preventDefault(); const it = find(a.closest('.wb-item').dataset.id); const i = navLanes().indexOf(it); if (i >= 0) navGo(i + 1, -1); }, true);
     viewport.addEventListener('pointerdown', onDown);
     viewport.addEventListener('dblclick', onDblClick);
@@ -1399,7 +1467,7 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
     if (it.type === 'icon') return openIconPicker(it);
     if (it.type === 'choice') return editChoice(it);
     if (it.type === 'summary') return editSummary(it);
-    if (['features', 'palette', 'imgslot', 'devlog'].includes(it.type)) return; // werden per Einzelklick bedient
+    if (['features', 'palette', 'imgslot', 'devlog', 'gallery'].includes(it.type)) return; // werden per Einzelklick bedient
     if (it.type === 'lane') return editLane(it);
     if (it.type === 'image') { replaceImageTarget = it; return $('.wb-file', root).click(); }
     if (TEXTUAL.includes(it.type)) editText(it.id);
@@ -1509,7 +1577,7 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
         <div class="p-row"><button class="pbtn danger" data-p="delete">Löschen</button></div>`;
     } else {
       const type = it.type;
-      const names = { proto: 'Prototyp', lane: 'Phase', devlog: 'Entwicklungsverlauf', features: 'Funktionsliste', palette: 'Farbpalette', imgslot: 'Bild-Platzhalter', choice: 'Auswahlliste', summary: 'KI-Prompt (automatisch)', draw: 'Zeichnung', note: 'Haftnotiz', text: 'Text', rect: 'Rechteck', ellipse: 'Kreis', diamond: 'Raute', shape: SHAPE_DEFS[it.shape]?.[0] || 'Form', icon: 'Icon', image: 'Bild', frame: 'Frame / Folie',
+      const names = { gallery: 'Bilder mit Erklärung', proto: 'Prototyp', lane: 'Phase', devlog: 'Entwicklungsverlauf', features: 'Funktionsliste', palette: 'Farbpalette', imgslot: 'Bild-Platzhalter', choice: 'Auswahlliste', summary: 'KI-Prompt (automatisch)', draw: 'Zeichnung', note: 'Haftnotiz', text: 'Text', rect: 'Rechteck', ellipse: 'Kreis', diamond: 'Raute', shape: SHAPE_DEFS[it.shape]?.[0] || 'Form', icon: 'Icon', image: 'Bild', frame: 'Frame / Folie',
         embed: EMBEDS[it.kind]?.label || 'Modul', design: DESIGNS[it.kind]?.label || 'Design', html: 'HTML-Visualisierung' };
       html = `<div class="p-title">${names[type]}</div>`;
       // Inhalt
@@ -2421,6 +2489,14 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
         cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
         const src = cv.toDataURL(file.type === 'image/png' ? 'image/png' : 'image/jpeg', 0.85);
         const w = Math.min(380, cv.width); const hh = Math.round(w * cv.height / cv.width);
+        if (replaceItem && replaceItem.type === 'gallery') {
+          const e2 = (replaceItem.entries || [])[replaceItem._pick]; delete replaceItem._pick; if (!e2) return;
+          const s2 = Math.min(1, 900 / Math.max(img.width, img.height)); const cv2 = document.createElement('canvas'); cv2.width = Math.round(img.width * s2); cv2.height = Math.round(img.height * s2);
+          cv2.getContext('2d').drawImage(img, 0, 0, cv2.width, cv2.height);
+          pushUndo(); e2.src = cv2.toDataURL('image/jpeg', 0.85); updateVisual(replaceItem); refreshSummaries(); scheduleSave();
+          if (!e2.cap) setTimeout(() => itemAction(replaceItem, `gl-cap:${replaceItem.entries.indexOf(e2)}`), 50);
+          return toast('Bild hinterlegt – jetzt kurz beschreiben, was die KI daraus übernehmen soll');
+        }
         if (replaceItem) {
           pushUndo();
           if (replaceItem.type === 'imgslot') { replaceItem.type = 'image'; replaceItem.caption = replaceItem.label; replaceItem.refImage = true; delete replaceItem.label; toast('Bild hinterlegt – denk daran, es später auch im KI-Tool hochzuladen'); }
@@ -2497,7 +2573,7 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
   function updateCtxBar() {
     const bar = $('.wb-ctx', root); if (!bar) return;
     const items = selItems();
-    const interactive = items.length === 1 && ['choice', 'features', 'palette', 'imgslot', 'summary', 'devlog', 'lane', 'proto'].includes(items[0].type); // dort würde die Leiste darüberliegende Listen verdecken
+    const interactive = items.length === 1 && ['choice', 'features', 'palette', 'imgslot', 'summary', 'devlog', 'lane', 'proto', 'gallery'].includes(items[0].type); // dort würde die Leiste darüberliegende Listen verdecken
     if (!items.length || P.active || drag || tool !== 'select' || interactive) { bar.classList.add('hidden'); return; }
     const one = items.length === 1 ? items[0] : null;
     const key = items.map(i => i.id + (i.locked ? 'L' : '') + i.type).join(',');
@@ -2908,7 +2984,7 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
     if (single && TEXTUAL.includes(single.type) && e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault(); return editText(single.id, { initial: e.key });
     }
-    if (e.key.startsWith('Arrow') && navLanes().length && uiPrefs.nav !== false && (e.altKey || !selItems().some(i => i.type !== 'lane'))) { e.preventDefault(); return navMove({ ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' }[e.key]); }
+    if (e.key.startsWith('Arrow') && navLanes().length && (e.altKey || !selItems().some(i => i.type !== 'lane'))) { e.preventDefault(); return navMove({ ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' }[e.key]); }
     if (e.key.startsWith('Arrow') && (selected || multi.length)) { e.preventDefault(); return nudge(e.key, e.shiftKey ? 10 : 1); }
     if (e.key === '?' || (e.key === 'F1')) { e.preventDefault(); return showShortcuts(); }
     if ((e.ctrlKey || e.metaKey) && k === 'l' && (selected || multi.length)) { e.preventDefault(); return toggleLock(); }
@@ -3076,11 +3152,17 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
         { ch: ['Steuerung', ['Tippen', 'Wischen', 'Gedrückt halten', 'Neigen (Sensor)', 'Tastatur', 'Maus'], { cols: 3 }] },
         { ch: ['Fortschritt', ['Level', 'Punkte', 'Leben', 'Power-ups', 'Errungenschaften', 'Tägliche Belohnung'], { cols: 3 }] },
       ]],
-      ['Spiel: Figuren, Welt & Story', [
+      ['Spiel: Story & Kontext', [
+        { note: 'Ausgangssituation – worum geht es? (Wer, wo, was ist passiert?):', h: 120, prompt: true, color: '#FCE7F3' },
+        { row: [{ note: 'Ziel des Spielers / Konflikt:', h: 110, prompt: true, color: '#FCE7F3' }, { note: 'Setting / Spielwelt (Ort, Zeit, Atmosphäre):', h: 110, prompt: true, color: '#D1FAE5' }] },
+        { ch: ['Ton & Stimmung', ['Lustig', 'Kindgerecht', 'Spannend', 'Episch', 'Düster', 'Mysteriös', 'Entspannt'], { cols: 3, label: 'Ton & Stimmung' }] },
+        { ch: ['Wie wird erzählt?', ['Intro-Text', 'Zwischensequenzen', 'Dialoge mit Figuren', 'Die Welt erzählt (ohne Text)', 'Tagebuch / Briefe / Funde', 'Keine Story nötig'], { cols: 2, label: 'Erzählweise' }] },
+        { note: 'Ausführliche Story / Kontext (gern komplett aus einem Dokument einfügen):', h: 170, prompt: true, color: '#FEF9C3' },
+      ]],
+      ['Spiel: Figuren & Bilder', [
         { row: [{ note: 'Hauptfigur (Aussehen, Fähigkeiten, Persönlichkeit):', h: 120, prompt: true, color: '#EDE9FE' }, { note: 'Gegner / Nebenfiguren:', h: 120, prompt: true, color: '#EDE9FE' }] },
-        { row: [{ note: 'Setting / Spielwelt (Ort, Zeit, Atmosphäre):', h: 120, prompt: true, color: '#D1FAE5' }, { note: 'Story & Ziel des Spiels:', h: 120, prompt: true, color: '#D1FAE5' }] },
-        { slots: ['Hauptfigur', 'Gegner', 'Setting / Hintergrund'], h: 150 },
-        { note: '📎 Hinweis: Bilder hier per Klick oder Drag & Drop hinterlegen. Der Prompt enthält nur Text – lade die Bilder im KI-Tool (z. B. Claude, Cursor) zusätzlich hoch, etwa per Drag & Drop in den Chat.', h: 80, color: '#FFEDD5', np: true },
+        { gallery: ['Hauptfigur', 'Gegner', 'Setting / Hintergrund'] },
+        { note: '📎 Mit „＋ Bild hinzufügen“ beliebig viele Bilder mit Erklärung anlegen (Figuren, Level, Gegenstände …). Der Prompt enthält nur Text – lade die Bilder im KI-Tool zusätzlich hoch, z. B. per Drag & Drop in den Chat.', h: 80, color: '#FFEDD5', np: true },
       ]],
       ['Design: Stil, Farben & Schrift', [
         { ch: ['Look', ['Minimalistisch', 'Verspielt & bunt', 'Retro / Pixel-Art', 'Modern & clean', 'Dunkel / Neon', 'Glassmorphism', 'Handgezeichnet', 'Business / seriös', 'Cartoon'], { cols: 3 }] },
@@ -3154,9 +3236,10 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
     }
     // ---- Phasen von links nach rechts (Swimlanes) ----
     const PH = [
+      { ic: '🧠', t: 'Brainstorming', sub: 'Idee grob skizzieren – die KI macht ein erstes Konzept, stellt Rückfragen und schlägt Funktionen vor.', c: '#C026D3', b: ['__brain'] },
       { ic: '💡', t: 'Idee & Zielgruppe', sub: 'Worum geht es – und für wen bauen wir die App?', c: '#7C3AED', b: ['App-Idee', 'App-Typ', 'Zielgruppe'] },
       { ic: '🧩', t: 'Funktionen & Umfang', sub: 'Was soll die App können – und was kommt in Version 1?', c: '#6366F1', b: ['Endgerät & Plattform', 'Allgemeine Funktionen', 'Spezifische technische Funktionen', 'Umfang & MVP-Plan'] },
-      { ic: '🎮', t: 'Spiel', sub: 'Nur ausfüllen, wenn du ein Spiel baust – sonst einfach überspringen.', c: '#DB2777', b: ['Spiel: Mechanik', 'Spiel: Figuren, Welt & Story'] },
+      { ic: '🎮', t: 'Spiel', sub: 'Nur ausfüllen, wenn du ein Spiel baust – sonst einfach überspringen.', c: '#DB2777', b: ['Spiel: Mechanik', 'Spiel: Story & Kontext', 'Spiel: Figuren & Bilder'] },
       { ic: '🎨', t: 'Design & UX', sub: 'Wie sieht die App aus und wie fühlt sie sich an?', c: '#EA580C', b: ['Design: Stil, Farben & Schrift', 'UX & UI'] },
       { ic: '⚙️', t: 'Technik & Business', sub: 'Womit bauen wir, wo liegen die Daten, wie verdient die App Geld?', c: '#0284C7', b: ['Daten & Backend', 'Vibe-Coding-Tool & Technik', 'Monetarisierung', 'Veröffentlichung'] },
       { ic: '🤖', t: 'Prompt an die KI', sub: 'Alles von links fließt automatisch in diesen Prompt – kopieren & loslegen.', c: '#9333EA', b: ['KI-Anweisungen (Gespräch strukturieren)', '__prompt'] },
@@ -3170,12 +3253,12 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
     // Kopfbereich
     add({ type: 'text', x: 0, y: 0, w: 2400, h: 84, text: 'App-Konzept · Vibe Coding', fs: 64, bold: true, color: '#1F1B2E' });
     add({ type: 'text', x: 0, y: 92, w: 2400, h: 40, text: 'Von der Idee bis zur veröffentlichten App – Phase für Phase von links nach rechts.', fs: 26, color: '#6B6680' });
-    add({ type: 'lane', guide: true, x: 0, y: 170, w: 1500, h: 340, c: '#7C3AED', ic: '👋', t: 'So funktioniert die Vorlage', locked: true,
-      steps: ['Optionen anklicken – fertig. „Sonstiges“ für eigene Angaben.', 'Notizen per Doppelklick ausfüllen. Mit „✦ Prompt“ markierte fließen in den Prompt.', 'In Phase 6 den fertigen Prompt kopieren und ins KI-Tool einfügen.', 'Danach: weiterentwickeln, testen, veröffentlichen – jede Phase hat ihren eigenen Prompt.', 'Navigieren: Konsole unten rechts oder Pfeiltasten – ← → wechselt die Phase, ↑ ↓ den Schritt.'] });
+    add({ type: 'lane', guide: true, x: 0, y: 170, w: 1500, h: 440, c: '#7C3AED', ic: '👋', t: 'So funktioniert die Vorlage', locked: true,
+      steps: ['Optionen anklicken – fertig. „Sonstiges“ für eigene Angaben.', 'Notizen per Doppelklick ausfüllen. Mit „✦ Prompt“ markierte fließen in den Prompt.', 'Klein anfangen? In Phase 1 die Idee grob notieren – die KI macht ein erstes Konzept daraus.', 'Nicht jeder Punkt nötig? „🤖 KI entscheiden lassen“ am Frame blendet ihn aus.', 'In Phase 7 den fertigen Prompt kopieren und ins KI-Tool einfügen.', 'Danach: weiterentwickeln, testen, veröffentlichen – jede Phase hat ihren eigenen Prompt.', 'Navigieren: Konsole unten rechts oder Pfeiltasten – ← → wechselt die Phase, ↑ ↓ den Schritt.'] });
     const ov = layoutBlocks([{ devlog: true }], 1600, 170, 2600, '#7C3AED', LABELS);
     add({ type: 'frame', x: 1600, y: 170, w: 2600, h: ov.h, color: '#F5F3FF', title: 'Entwicklungsverlauf (Übersicht)', order: 1, phase: 'overview' });
     ov.kids.forEach(k => add(k));
-    const top = 170 + Math.max(340, ov.h) + 140;
+    const top = 170 + Math.max(440, ov.h) + 140;
     const lanes = [];
     PH.forEach((ph, pi) => {
       const lx = pi * (LW + LG); let cy = top + HEAD; let k = 0;
@@ -3189,7 +3272,8 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
         else if (name === '__iter') frame('Weiterentwicklung #1', iterationBlocks(1), { phase: 'iteration', iterNo: 1, created: today(), order: 701 });
         else if (name === '__test') frame('User Testing', testingBlocks(), { phase: 'testing' });
         else if (name === '__live') frame('Go-Live (Veröffentlichung)', goliveBlocks(), { phase: 'golive' });
-        else frame(name, byName[name]);
+        else if (name === '__brain') frame('Ideen sammeln & KI-Brainstorming', brainstormBlocks(), { phase: 'brainstorm' });
+        else frame(name, byName[name], { canAi: true });
       });
       lanes.push({ type: 'lane', x: lx, y: top, w: LW, h: cy - top - VG + LP, c: ph.c, ic: ph.ic, no: pi + 1, t: ph.t, sub: ph.sub, last: pi === PH.length - 1, locked: true });
     });
@@ -3211,14 +3295,35 @@ button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:
         b.row.forEach((r, i) => kids.push({ type: 'note', x: fx + PAD + i * (cw + 14), y: fy + cy, w: Math.round(cw), h: hh, color: r.color, text: r.note, ph: r.note, fs: 14, align: r.align || 'left', promptInclude: !!r.prompt }));
         cy += hh + 18; }
       if (b.sum) { kids.push({ type: 'summary', mode: b.sum.mode, title: b.sum.title, x: fx + PAD, y: fy + cy, w: W, h: b.sum.h || 380 }); cy += (b.sum.h || 380) + 18; }
+      if (b.gallery) { const n = b.gallery.length; const hh = 60 + Math.ceil((n + 1) / 3) * 228; kids.push({ type: 'gallery', title: 'Bilder mit Erklärung', color, entries: b.gallery.map(l => ({ label: l, cap: '' })), x: fx + PAD, y: fy + cy, w: W, h: hh }); cy += hh + 18; }
       if (b.devlog) { kids.push({ type: 'devlog', title: 'Entwicklungsverlauf', x: fx + PAD, y: fy + cy, w: W, h: 260 }); cy += 260 + 18; }
     });
     return { kids, h: cy + PAD - 18 + 8 };
   }
   const STATUS_ITER = ['Geplant', 'In Arbeit', 'Getestet', 'Erledigt'];
+  function brainstormBlocks() {
+    return [
+      { note: 'Meine Idee in Stichworten (ganz grob reicht):', h: 150, prompt: true, color: '#FAE8FF' },
+      { row: [{ note: 'Welches Problem löst sie / warum macht sie Spaß?', h: 110, prompt: true, color: '#FAE8FF' }, { note: 'Für wen ist sie gedacht?', h: 110, prompt: true, color: '#FAE8FF' }] },
+      { row: [{ note: 'Inspiration / ähnliche Apps oder Spiele:', h: 110, prompt: true, color: '#EDE9FE' }, { note: 'Wie soll sie sich anfühlen? (z. B. schnell, gemütlich, motivierend)', h: 110, prompt: true, color: '#EDE9FE' }] },
+      { ch: ['Grobe Richtung', ['App', 'Spiel', 'Web-Tool', 'Noch offen'], { mode: 'single', cols: 4, label: 'Grobe Richtung' }] },
+      { ch: ['Was soll die KI im Brainstorming liefern?', [
+        { t: 'Erstes Konzept', p: 'Erstelle aus meinen Stichworten ein kompaktes erstes Konzept: Kernidee, Zielgruppe, wichtigste Screens und der Ablauf aus Sicht der Nutzer.' },
+        { t: 'Rückfragen', p: 'Stelle mir 5–10 gezielte Rückfragen, die für die weitere Planung wichtig sind – nummeriert, damit ich sie leicht beantworten kann.' },
+        { t: 'Technische Funktionen vorschlagen', p: 'Schlage technische Funktionen vor – als Liste zum Kopieren, eine Funktion pro Zeile im Format „- Funktion (hoch)“, „(mittel)“ oder „(niedrig)“ für die Priorität. Ich füge die Liste danach in meine Planungsvorlage ein.' },
+        { t: 'MVP-Vorschlag', p: 'Schlage vor, was in eine erste Version (MVP) gehört und was später kommen kann.' },
+        { t: 'Namensideen', p: 'Mache 5 Vorschläge für einen Namen.' },
+        { t: 'Risiken & Stolpersteine', p: 'Nenne die größten Risiken oder schwierigen Stellen bei der Umsetzung mit Vibe Coding.' },
+        { t: 'Passende Technik', p: 'Empfiehl eine einfache, passende Technik bzw. ein geeignetes Vibe-Coding-Tool.' },
+      ], { cols: 1, section: 'tasks', sel: ['Erstes Konzept', 'Rückfragen', 'Technische Funktionen vorschlagen'] }] },
+      { note: '💡 So geht’s weiter: Antwort der KI lesen und Rückfragen beantworten. Die vorgeschlagenen Funktionen kopieren → in Phase 3 bei „Spezifische technische Funktionen“ auf „+ Funktion“ klicken und einfügen – Prioritäten in Klammern werden automatisch erkannt.', h: 100, color: '#FFEDD5', np: true },
+      { sum: { mode: 'brainstorm', title: 'Prompt fürs Brainstorming', h: 420 } },
+    ];
+  }
   function iterationBlocks(n) {
     return [
       { ch: ['Status dieser Runde', STATUS_ITER, { mode: 'single', cols: 4, status: true, sel: ['Geplant'] }] },
+      { ch: ['Rolle der KI in dieser Runde', [{ t: 'Wie im Hauptprompt' }, { t: 'UX/UI-Designer', p: 'ein erfahrener UX/UI-Designer mit Fokus auf Bedienbarkeit, klare Gestaltung und Barrierefreiheit' }, { t: 'Frontend-Entwickler', p: 'ein erfahrener Frontend-Entwickler' }, { t: 'Backend- & Datenbank-Experte', p: 'ein erfahrener Backend- und Datenbank-Experte' }, { t: 'Game-Designer', p: 'ein erfahrener Game-Designer (Spielmechanik, Balancing, Spielspaß)' }, { t: 'QA- & Test-Ingenieur', p: 'ein gründlicher QA- und Test-Ingenieur, der Fehler systematisch findet und behebt' }, { t: 'Performance-Experte', p: 'ein Experte für Performance und Ladezeiten' }, { t: 'Experte für Barrierefreiheit', p: 'ein Experte für digitale Barrierefreiheit (WCAG)' }, { t: 'Security-Experte', p: 'ein erfahrener Security-Experte' }], { mode: 'single', cols: 2, section: 'role', sel: ['Wie im Hauptprompt'], other: true }] },
       { ch: ['Schwerpunkt', ['Fehler beheben', 'Fehlende Funktionen ergänzen', 'Neue Ideen umsetzen', 'Design & UX verbessern', 'Performance / Ladezeit', 'Code aufräumen', 'Tests ergänzen'], { cols: 2, label: 'Schwerpunkt' }] },
       { fx: { title: 'Funktioniert nicht (Fehler / Bugs)', label: 'Fehler, die behoben werden müssen', color: '#DC2626', hint: 'Was funktioniert nicht? Möglichst genau: Was hast du gemacht, was ist passiert, was hätte passieren sollen?' } },
       { fx: { title: 'Fehlt noch / neue Funktionen', label: 'Fehlende oder neue Funktionen', color: '#7C3AED', hint: 'Funktionen, die im ersten Entwurf fehlen oder dir beim Testen eingefallen sind.' } },
