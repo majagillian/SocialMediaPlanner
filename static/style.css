@@ -854,3 +854,64 @@ a.btn { text-decoration: none; }
 .lane-steps li { margin: 6px 0; padding-left: 6px; } .lane-steps li::marker { color: var(--lc); font-weight: 800; }
 .toc-lane { cursor: pointer; color: var(--lc); border-top: 1px solid var(--line); margin-top: 6px; }
 .toc-lane:hover { text-decoration: underline; }
+
+/* ======================= Navigationskonsole ======================= */
+.lane-arrow { pointer-events: auto; cursor: pointer; transition: transform .15s, background .15s; }
+.lane-arrow:hover { transform: scale(1.1); background: var(--lc); color: #fff; }
+.wb-nav { --lc: #7C3AED; position: absolute; right: 16px; bottom: 16px; z-index: 30; width: 330px; background: #fff; border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 12px 36px rgba(31,27,46,.16); padding: 10px 12px 12px; user-select: none; }
+.wb-nav.hidden { display: none; }
+.nav-top { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+.nav-title { flex: 1; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.nav-top button { width: 24px; height: 24px; border: 0; background: transparent; border-radius: 6px; color: var(--muted); cursor: pointer; font-size: 14px; }
+.nav-top button:hover { background: var(--violet-xl); color: var(--violet); }
+.nav-where { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 12px; background: color-mix(in srgb, var(--lc) 10%, #fff); border-left: 4px solid var(--lc); transition: background .3s; }
+.nav-where i { font-style: normal; font-size: 26px; line-height: 1; }
+.nav-where div { display: flex; flex-direction: column; min-width: 0; }
+.nav-where small { font-size: 11px; color: var(--muted); font-weight: 600; }
+.nav-where b { font-size: 14px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav-body { display: flex; gap: 12px; margin-top: 10px; align-items: center; }
+.wb-nav.nav-collapsed .nav-body { display: none; }
+.nav-pad { display: grid; grid-template-columns: repeat(3, 38px); grid-template-rows: repeat(3, 38px); gap: 4px; flex: none; }
+.nav-pad button { border: 0; border-radius: 10px; background: var(--lc); color: #fff; font-size: 15px; cursor: pointer; box-shadow: 0 2px 0 color-mix(in srgb, var(--lc) 60%, #000); transition: transform .08s, filter .15s; }
+.nav-pad button:hover { filter: brightness(1.1); } .nav-pad button:active { transform: translateY(2px); box-shadow: none; }
+.nav-pad button:disabled { background: var(--line); color: var(--muted); box-shadow: none; cursor: default; }
+.np-up { grid-area: 1 / 2; } .np-left { grid-area: 2 / 1; } .np-home { grid-area: 2 / 2; background: #fff !important; color: var(--lc) !important; border: 2px solid var(--lc) !important; box-shadow: none !important; font-size: 18px !important; } .np-right { grid-area: 2 / 3; } .np-down { grid-area: 3 / 2; }
+.nav-side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.nav-dots { display: flex; flex-wrap: wrap; gap: 4px; }
+.nav-dots button { width: 28px; height: 28px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--lc) 40%, transparent); background: #fff; font-size: 13px; line-height: 1; cursor: pointer; padding: 0; transition: transform .12s; }
+.nav-dots button:hover { transform: scale(1.12); }
+.nav-dots button.done { background: color-mix(in srgb, var(--lc) 15%, #fff); }
+.nav-dots button.on { border-color: var(--lc); background: var(--lc); box-shadow: 0 0 0 3px color-mix(in srgb, var(--lc) 25%, transparent); }
+.nav-steps { display: flex; flex-wrap: wrap; gap: 4px; min-height: 22px; }
+.nav-steps button { min-width: 24px; height: 22px; border-radius: 6px; border: 1px solid var(--line); background: #fff; font-size: 11px; font-weight: 700; color: var(--ink-2); cursor: pointer; }
+.nav-steps button.on { background: var(--lc); border-color: var(--lc); color: #fff; }
+.nav-keys { font-size: 10.5px; color: var(--muted); }
+.wb-props:not(.hidden) ~ .wb-nav { right: 302px; }
+
+/* ======================= Klickbarer Prototyp ======================= */
+.wb-proto { display: flex; flex-direction: column; background: #1F1B2E; border-radius: 26px; padding: 0 10px 12px; box-shadow: 0 14px 40px rgba(31,27,46,.25); }
+.pr-head { display: flex; align-items: center; gap: 6px; height: 46px; color: #fff; padding: 0 4px; cursor: grab; flex: none; }
+.pr-title { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+.pr-ver { font-size: 11px; font-weight: 700; background: rgba(255,255,255,.14); padding: 2px 7px; border-radius: 99px; flex: none; }
+.pr-dev { display: flex; gap: 2px; background: rgba(255,255,255,.08); border-radius: 9px; padding: 2px; flex: none; }
+.pr-dev button { border: 0; background: transparent; width: 28px; height: 26px; border-radius: 7px; cursor: pointer; font-size: 14px; opacity: .55; }
+.pr-dev button.on { background: rgba(255,255,255,.2); opacity: 1; }
+.pr-head .grow { flex: 1; }
+.pr-btn { border: 0; height: 30px; padding: 0 10px; border-radius: 9px; background: rgba(255,255,255,.12); color: #fff; font-weight: 700; font-size: 13px; cursor: pointer; flex: none; white-space: nowrap; }
+.pr-btn:hover { background: rgba(255,255,255,.22); }
+.pr-btn.on { background: var(--orange); color: #fff; }
+.pr-btn.ai { background: var(--violet); } .pr-btn.ai:hover { background: #8B5CF6; }
+.pr-body { flex: 1; min-height: 0; display: flex; }
+.pr-screen { position: relative; flex: 1; border-radius: 18px; overflow: hidden; background: #fff; }
+.pr-body.dev-desktop .pr-screen { border-radius: 8px; }
+.pr-screen iframe { width: 100%; height: 100%; border: 0; display: block; background: #fff; }
+.pr-layer { position: absolute; inset: 0; pointer-events: none; }
+.wb-proto.commenting .pr-layer { pointer-events: auto; cursor: crosshair; background: rgba(251,146,60,.06); box-shadow: inset 0 0 0 3px var(--orange); border-radius: inherit; }
+.pr-pin { position: absolute; transform: translate(-50%, -100%); pointer-events: auto; width: 30px; height: 30px; border-radius: 50% 50% 50% 0; border: 2px solid #fff; background: var(--orange); color: #fff; font-weight: 800; font-size: 13px; cursor: pointer; box-shadow: 0 3px 10px rgba(0,0,0,.25); padding: 0; display: grid; place-items: center; }
+.pr-pin.sent { background: var(--violet); }
+.pr-pin.done { background: var(--mint-d); opacity: .75; }
+.pr-pin:hover { transform: translate(-50%, -100%) scale(1.15); z-index: 2; }
+.pr-busy { display: none; position: absolute; inset: 46px 10px 12px; border-radius: 18px; background: rgba(31,27,46,.72); color: #fff; font-weight: 700; flex-direction: column; align-items: center; justify-content: center; gap: 14px; z-index: 3; }
+.wb-proto.busy .pr-busy { display: flex; }
+.pr-busy span { width: 38px; height: 38px; border-radius: 50%; border: 4px solid rgba(255,255,255,.3); border-top-color: var(--mint); animation: prspin 1s linear infinite; }
+@keyframes prspin { to { transform: rotate(360deg); } }

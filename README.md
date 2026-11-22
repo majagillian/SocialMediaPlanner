@@ -75,6 +75,12 @@ Für die Planung von Apps, Handyspielen und Web-Apps, die du mit KI baust (z. B.
 - Oben stehen eine Kurzanleitung und der Entwicklungsverlauf.
 - Das **Inhaltsverzeichnis** gruppiert die Frames nach Phasen. Ein Klick auf eine Phase zoomt auf ihren Anfang.
 - Doppelklick auf einen Phasenkopf ändert Titel, Emoji, Erklärung und Farbe.
+- **Navigationskonsole** (unten rechts, oben über „Navigation“ ein-/ausblendbar):
+  - Steuerkreuz: ▶/◀ wechselt die Phase, ▼/▲ geht Schritt für Schritt durch die Frames. ▼ am Ende einer Phase springt automatisch zur nächsten, ⌂ führt zum Anfang.
+  - Zeigt an, wo du gerade bist („Phase 2 von 10 · Schritt 3/4“). Phasen-Punkte und Schritt-Nummern sind anklickbar.
+  - Die Anzeige folgt auch, wenn du selbst verschiebst oder zoomst. Einklappbar, damit sie im Video nicht stört.
+  - Tastatur: Pfeiltasten (wenn nichts ausgewählt ist) oder immer mit Alt + Pfeiltasten.
+  - Die runden Pfeile zwischen den Phasenköpfen sind klickbar und springen zur nächsten Phase.
 - Neue Weiterentwicklungs-Runden erscheinen untereinander in Phase 7. Die Spalte wächst automatisch mit.
 
 - **Auswahllisten:** Optionen anklicken. Fast jede Liste hat **„Sonstiges“** mit Freitext. Ein Doppelklick bearbeitet Überschrift, Optionen und die Bezeichnung im Prompt. Eigene Listen legst du mit der Taste K an.
@@ -88,6 +94,15 @@ Für die Planung von Apps, Handyspielen und Web-Apps, die du mit KI baust (z. B.
   - **Zusätzliche Aufgaben**, z. B. Benchmark-Analyse, ergänzende Funktionen vorschlagen, Wettbewerbsfähigkeit einschätzen, klickbaren Prototyp erstellen, Testanleitung schreiben, Code ins Git-Repository pushen (fragt nach dem Link), README, Deployment, DSGVO- und Barrierefreiheits-Check, App-Store-Texte, Ideen für Videotitel und Thumbnail
   - eine Notiz für eigene Anweisungen
 - **KI-Prompt (automatisch):** baut sich live auf aus Rolle, ausgefüllten Notizen, Anforderungen, Farbpalette, priorisierten Funktionen, Referenzbildern, Arbeitsweise und nummerierten Aufgaben. Mit „Kopieren“ landet er in der Zwischenablage.
+### Klickbarer Prototyp auf dem Board (Werkzeug 📱, Taste U)
+- **Importieren:** HTML-Datei hochladen (z. B. den Prototyp aus Claude), Code einfügen oder Beispiel-Prototyp. Der Prototyp läuft live und ist direkt auf dem Board klickbar.
+- **Ansicht:** 📱 Handy, 📲 Tablet oder 🖥️ Desktop. ↻ startet den Prototyp neu.
+- **Kommentieren:** 💬 schaltet den Kommentarmodus ein. Ein Klick auf eine Stelle heftet einen nummerierten Pin an. Ein Klick auf einen Pin öffnet: bearbeiten, erledigt, löschen. Pins merken sich ihre Position in Prozent der sichtbaren Ansicht. Wenn du im Prototyp scrollst oder die Ansicht wechselst, können sie verrutschen.
+- **Mit KI bearbeiten (✨ KI):** Änderung beschreiben, optional alle offenen Kommentare mitschicken. Claude überarbeitet den Code über deinen hinterlegten API-Schlüssel, umgesetzte Kommentare werden abgehakt.
+- **Versionen (⋯ → Versionen):** Jede Änderung (KI, Code, Upload) speichert die vorherige Version (bis zu 25). Wiederherstellen oder zum Vergleich als Kopie daneben legen.
+- **⋯-Menü:** Code bearbeiten, neue Version hochladen, Kommentare als Text kopieren (für Claude), als HTML herunterladen, umbenennen.
+- **Offene Kommentare → Weiterentwicklung:** übernimmt alle neuen Kommentare als Punkte in eine Liste der aktuellen Weiterentwicklungs-Runde. Der Prompt der Runde aktualisiert sich sofort.
+
 ### Von der Idee bis zur Veröffentlichung
 Unter dem ersten Prompt begleitet dich die Vorlage weiter:
 - **Entwicklungsverlauf (Übersicht):** zeigt automatisch den Fortschritt in vier Schritten (Konzept, Weiterentwicklung, User Testing, Go-Live) und listet alle Weiterentwicklungs-Runden mit Datum, Status und erledigten/offenen Punkten (🐞 Fehler, ✨ Funktionen, ⚙️ Verbesserungen). Ein Klick springt zur Runde. Mit „+ Neue Weiterentwicklungs-Runde“ legst du beliebig viele Runden an.

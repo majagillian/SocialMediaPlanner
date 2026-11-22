@@ -134,6 +134,7 @@ window.Board = (() => {
             <button data-b="toc" title="Inhaltsverzeichnis der Frames">${ic('list-tree', '#6B6780', 'ic sm')}<span>Inhalt</span></button>
             <button data-b="tools" title="Werkzeugleiste ein-/ausblenden">${ic('pencil-ruler', '#6B6780', 'ic sm')}<span>Werkzeuge</span></button>
             <button data-b="propsp" title="Eigenschaften-Panel ein-/ausblenden">${ic('sliders-horizontal', '#6B6780', 'ic sm')}<span>Eigenschaften</span></button>
+            <button data-b="nav" title="Navigationskonsole (nur bei Boards mit Phasen)">${ic('gamepad-2', '#6B6780', 'ic sm')}<span>Navigation</span></button>
           </div>
           <button class="btn sm ghost" data-b="help" title="Tastenkürzel & Bedienung (?)">${ic('keyboard', '#6B6780', 'ic sm')}</button>
           <button class="btn sm ghost" data-b="undo" title="Rückgängig (Strg+Z)">${ic('undo-2', '#6B6780', 'ic sm')}</button>
@@ -159,6 +160,7 @@ window.Board = (() => {
           ${toolBtn('icon', 'shapes', 'Icon-Bibliothek (I)')}
           ${toolBtn('image', 'image-plus', 'Bild einfügen')}
           ${toolBtn('html', 'code-xml', 'HTML-Visualisierung (Y)')}
+          ${toolBtn('proto', 'smartphone', 'Klickbarer Prototyp (U) – importieren, kommentieren, mit KI bearbeiten')}
           <i class="sep"></i>
           <button class="tool embed-tool" data-tool="embed" title="Modul einbetten (E)">${ic('blocks', '#FFFFFF', 'ic')}</button>
         </div>
@@ -167,6 +169,7 @@ window.Board = (() => {
         <div class="wb-props hidden"></div>
         <div class="wb-ctx hidden"></div>
         <div class="wb-hint"></div>
+        <div class="wb-nav hidden"></div>
         <div class="pres-bar">
           <button class="pb" data-pres="prev" title="Zurück (←)">‹</button>
           <span class="pres-info"></span>
@@ -219,6 +222,7 @@ window.Board = (() => {
       if (t === 'image') return $('.wb-file', root).click();
       if (t === 'design') return openDesignGallery();
       if (t === 'html') return addHtml();
+      if (t === 'proto') return addProto();
       if (t === 'frame') return openFrameTemplates();
       if (t === 'shapes') return toggleShapePicker(b);
       if (t === 'choice') return addChoice();
@@ -238,6 +242,7 @@ window.Board = (() => {
       if (a === 'tools') { uiPrefs.tools = !uiPrefs.tools; saveUi(); applyUi(); }
       if (a === 'propsp') { propsOpen = !propsOpen; try { localStorage.setItem('vp-props', propsOpen ? '1' : '0'); } catch { /* egal */ } applyUi(); renderProps(); $('.wb-ctx', root).dataset.key = ''; updateCtxBar(); }
       if (a === 'toc') { uiPrefs.toc = !uiPrefs.toc; saveUi(); applyUi(); }
+      if (a === 'nav') { uiPrefs.nav = uiPrefs.nav === false; saveUi(); applyUi(); if (uiPrefs.nav && !navLanes().length) toast('Die Navigation erscheint bei Boards mit Phasen, z. B. der Vorlage „App-Konzept“'); }
       if (a === 'present') startPresentation();
       if (a === 'new') {
         const own = getSetting('boardTemplates', []);
@@ -341,8 +346,9 @@ window.Board = (() => {
     ['Cyberpunk', ['#FDE047', '#06B6D4', '#E11D48', '#09090B', '#FAFAFA']], ['Gaming Dark', ['#22C55E', '#6366F1', '#F43F5E', '#111827', '#F9FAFB']],
   ];
   const PAL_ROLES = ['Primär', 'Sekundär', 'Akzent', 'Hintergrund', 'Text'];
-  async function itemAction(it, act) {
+  async function itemAction(it, act, pt) {
     const [a, arg] = act.split(':'); const i = Number(arg);
+    if (a.startsWith('pr-')) return protoAction(it, a, arg, pt);
     if (a === 'ch-other') {
       const v = await openForm({ title: `${it.title}: Sonstiges`, values: { t: it.otherText || '' }, submitLabel: 'Übernehmen', fields: [{ key: 't', label: 'Eigene Angabe (leer lassen = nicht ausgewählt)', type: 'textarea', rows: 2 }] });
       if (!v) return; pushUndo(); it.otherText = v.t.trim();
@@ -490,6 +496,168 @@ window.Board = (() => {
     lines.push('', sum.outro ?? T2.outro);
     return lines.join('\n');
   }
+  // ---------- Klickbarer Prototyp --------------------------------------------
+  const PR_DEV = { phone: { w: 420, h: 900, ic: '📱', t: 'Handy' }, tablet: { w: 860, h: 1200, ic: '📲', t: 'Tablet' }, desktop: { w: 1280, h: 860, ic: '🖥️', t: 'Desktop' } };
+  const PR_SAMPLE = `<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Star Jumper</title>
+<style>*{box-sizing:border-box;margin:0}body{font-family:system-ui,sans-serif;background:#F5F3FF;color:#1F1B2E;height:100vh;display:flex;flex-direction:column}
+header{background:#7C3AED;color:#fff;padding:18px 20px;font-weight:800;font-size:20px}.screen{flex:1;display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center}.screen.on{display:flex}
+button{border:0;border-radius:14px;padding:14px 26px;font-size:17px;font-weight:700;background:#34D399;color:#064E3B;cursor:pointer}button.sec{background:#fff;color:#7C3AED;border:2px solid #7C3AED}
+.star{font-size:64px;cursor:pointer;transition:transform .15s}.star:active{transform:scale(1.3)}.score{font-size:28px;font-weight:800;color:#7C3AED}</style></head>
+<body><header>⭐ Star Jumper</header>
+<section class="screen on" id="start"><div style="font-size:72px">🚀</div><h2>Sammle so viele Sterne wie möglich!</h2><button onclick="go('game')">Spiel starten</button><button class="sec" onclick="go('scores')">Bestenliste</button></section>
+<section class="screen" id="game"><div class="score">Punkte: <span id="p">0</span></div><div class="star" onclick="hit()">⭐</div><p>Tippe auf den Stern!</p><button class="sec" onclick="go('start')">Beenden</button></section>
+<section class="screen" id="scores"><h2>🏆 Bestenliste</h2><p>1. Maja – 42<br>2. Tom – 37<br>3. Lea – 29</p><button onclick="go('start')">Zurück</button></section>
+<script>let pts=0;function go(id){document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on',s.id===id));if(id==='game'){pts=0;p.textContent=0}}function hit(){p.textContent=++pts}<\/script></body></html>`;
+  function protoHead(it) {
+    const dev = it.device || 'phone', open = (it.pins || []).filter(p => !p.done).length;
+    return `<span class="pr-title" title="${esc(it.title || 'Prototyp')}">${esc(it.title || 'Prototyp')}</span><span class="pr-ver" title="Aktuelle Version">v${(it.versions || []).length + 1}</span>
+      <span class="pr-dev">${Object.entries(PR_DEV).map(([k, v]) => `<button data-act="pr-dev:${k}" class="${dev === k ? 'on' : ''}" title="${v.t}-Ansicht">${v.ic}</button>`).join('')}</span>
+      <span class="grow"></span>
+      <button data-act="pr-reload" class="pr-btn" title="Neu starten">↻</button>
+      <button data-act="pr-cm" class="pr-btn ${it._cm ? 'on' : ''}" title="${it._cm ? 'Kommentarmodus beenden' : 'Kommentieren: Pins auf den Prototyp setzen'}">💬 ${open}</button>
+      <button data-act="pr-ai" class="pr-btn ai" title="Mit KI bearbeiten">✨ KI</button>
+      <button data-act="pr-menu" class="pr-btn" title="Mehr: Code, Versionen, Download, an Weiterentwicklung übergeben">⋯</button>`;
+  }
+  const protoPins = it => (it.pins || []).map(p => `<button class="pr-pin ${p.done ? 'done' : ''} ${p.sent ? 'sent' : ''}" data-act="pr-pin:${p.id}" style="left:${p.x}%;top:${p.y}%" title="${esc(p.text)}">${p.n}</button>`).join('');
+  /** Kopf und Pins aktualisieren, ohne den Prototyp neu zu laden */
+  function refreshProto(it) {
+    const n = nodeOf(it.id); if (!n) return;
+    n.classList.toggle('commenting', !!it._cm);
+    $('.pr-head', n).innerHTML = protoHead(it); $('.pr-layer', n).innerHTML = protoPins(it);
+  }
+  function pickHtmlFile() {
+    return new Promise(resolve => {
+      const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.html,.htm,text/html';
+      inp.onchange = async () => { const f = inp.files[0]; if (!f) return resolve(null); resolve({ name: f.name.replace(/\.html?$/i, ''), html: await f.text() }); };
+      inp.click();
+    });
+  }
+  async function askHtmlCode(title = '', html = '') {
+    const v = await openForm({ title: html ? 'Prototyp-Code bearbeiten' : 'Prototyp-Code einfügen', submitLabel: 'Übernehmen', values: { title, html }, fields: [
+      { key: 'title', label: 'Name', required: true },
+      { key: 'html', label: 'HTML-Code (eine vollständige HTML-Datei, z. B. aus Claude kopiert)', type: 'textarea', rows: 14, required: true },
+    ] });
+    return v ? { name: v.title, html: v.html } : null;
+  }
+  async function addProto(pos) {
+    const how = await choose('Klickbaren Prototyp einfügen', [
+      { value: 'file', label: 'HTML-Datei hochladen', desc: 'z. B. den heruntergeladenen Prototyp aus Claude', icon: 'upload' },
+      { value: 'code', label: 'Code einfügen', desc: 'HTML aus der Zwischenablage einfügen', icon: 'clipboard-paste' },
+      { value: 'sample', label: 'Beispiel-Prototyp', desc: 'Kleine Demo-App zum Ausprobieren', icon: 'sparkles' },
+    ]);
+    if (!how) return;
+    const r = how === 'file' ? await pickHtmlFile() : how === 'code' ? await askHtmlCode('Mein Prototyp') : { name: 'Star Jumper (Beispiel)', html: PR_SAMPLE };
+    if (!r || !r.html.trim()) return;
+    const dv = PR_DEV.phone;
+    const it = addItem({ type: 'proto', title: r.name || 'Prototyp', html: r.html, device: 'phone', pins: [], versions: [], w: dv.w, h: dv.h }, pos);
+    toast('Prototyp eingefügt – direkt durchklicken, mit 💬 kommentieren oder mit ✨ KI ändern');
+    return it;
+  }
+  function pushVersion(it, note) {
+    it.versions = [...(it.versions || []), { html: it.html, at: new Date().toISOString(), note: note || '' }].slice(-25);
+  }
+  const fmtDT = iso => { const d = new Date(iso); return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}. ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  async function protoAction(it, a, arg, pt) {
+    const node = nodeOf(it.id);
+    if (a === 'pr-reload') { const f = node && $('iframe', node); if (f) f.srcdoc = it.html || ''; return; }
+    if (a === 'pr-dev') { if ((it.device || 'phone') === arg) return; pushUndo(); const dv = PR_DEV[arg]; const cx = it.x + it.w / 2; it.device = arg; it.w = dv.w; it.h = dv.h; it.x = Math.round(cx - dv.w / 2); updateVisual(it); return scheduleSave(); }
+    if (a === 'pr-cm') { it._cm = !it._cm; refreshProto(it); if (it._cm) toast('Kommentarmodus: Klicke auf eine Stelle im Prototyp, um einen Kommentar anzuheften'); return; }
+    if (a === 'pr-add') {
+      if (!it._cm || !pt || !node) return;
+      const r = $('.pr-screen', node).getBoundingClientRect();
+      const x = Math.round(Math.min(98, Math.max(2, (pt.x - r.left) / r.width * 100)) * 10) / 10, y = Math.round(Math.min(98, Math.max(2, (pt.y - r.top) / r.height * 100)) * 10) / 10;
+      const v = await openForm({ title: 'Kommentar anheften', submitLabel: 'Anheften', values: { text: '' }, fields: [{ key: 'text', label: 'Was fällt dir hier auf? (Fehler, Wunsch, Idee)', type: 'textarea', rows: 3, required: true }] });
+      if (!v) return; pushUndo();
+      const n = Math.max(0, ...(it.pins || []).map(p => p.n)) + 1;
+      it.pins = [...(it.pins || []), { id: uid(), n, x, y, text: v.text.trim(), done: false, created: new Date().toISOString(), ver: (it.versions || []).length + 1 }];
+      refreshProto(it); return scheduleSave();
+    }
+    if (a === 'pr-pin') {
+      const p = (it.pins || []).find(q => q.id === arg); if (!p) return;
+      const c = await choose(`Kommentar #${p.n}: ${p.text}`, [
+        { value: 'edit', label: 'Bearbeiten', icon: 'pencil' },
+        { value: 'done', label: p.done ? 'Wieder öffnen' : 'Als erledigt markieren', icon: p.done ? 'rotate-ccw' : 'check' },
+        { value: 'del', label: 'Löschen', icon: 'trash-2' },
+      ]);
+      if (!c) return; pushUndo();
+      if (c === 'edit') { const v = await openForm({ title: `Kommentar #${p.n}`, values: { text: p.text }, fields: [{ key: 'text', label: 'Kommentar', type: 'textarea', rows: 3, required: true }] }); if (v) p.text = v.text.trim(); }
+      if (c === 'done') p.done = !p.done;
+      if (c === 'del') it.pins = it.pins.filter(q => q !== p);
+      refreshProto(it); return scheduleSave();
+    }
+    if (a === 'pr-ai') return protoAi(it);
+    if (a === 'pr-menu') {
+      const open = (it.pins || []).filter(p => !p.done);
+      const c = await choose(it.title || 'Prototyp', [
+        { value: 'code', label: 'Code bearbeiten', desc: 'HTML direkt ändern (neue Version)', icon: 'code-xml' },
+        { value: 'file', label: 'Neue Version hochladen', desc: 'z. B. nach einer Runde in Claude', icon: 'upload' },
+        { value: 'versions', label: `Versionen (${(it.versions || []).length + 1})`, desc: 'Zurückspringen oder alte Version zum Vergleich daneben legen', icon: 'history' },
+        { value: 'iter', label: `Offene Kommentare → Weiterentwicklung (${open.filter(p => !p.sent).length})`, desc: 'Als Punkte in die aktuelle Weiterentwicklungs-Runde übernehmen', icon: 'git-branch-plus' },
+        { value: 'copy', label: 'Kommentare als Text kopieren', desc: 'Zum Einfügen in Claude oder ein anderes KI-Tool', icon: 'copy' },
+        { value: 'dl', label: 'Als HTML-Datei herunterladen', icon: 'download' },
+        { value: 'rename', label: 'Umbenennen', icon: 'type' },
+      ]);
+      if (!c) return;
+      if (c === 'code' || c === 'file') {
+        const r = c === 'file' ? await pickHtmlFile() : await askHtmlCode(it.title, it.html);
+        if (!r || !r.html.trim() || r.html === it.html) return; pushUndo();
+        pushVersion(it, c === 'file' ? 'vor Upload' : 'vor Code-Änderung'); it.html = r.html; if (c === 'code' && r.name) it.title = r.name;
+        updateVisual(it); scheduleSave(); return toast(`Version ${(it.versions || []).length + 1} gespeichert`);
+      }
+      if (c === 'versions') return protoVersions(it);
+      if (c === 'iter') return protoToIteration(it);
+      if (c === 'copy') { const txt = protoCommentText(it, open); if (!txt) return toast('Keine offenen Kommentare'); try { await navigator.clipboard.writeText(txt); toast('Kommentare kopiert'); } catch { toast('Kopieren nicht möglich'); } return; }
+      if (c === 'dl') { const a2 = document.createElement('a'); a2.href = URL.createObjectURL(new Blob([it.html || ''], { type: 'text/html' })); a2.download = (it.title || 'prototyp').replace(/[^\wäöüÄÖÜß -]+/g, '').trim().replace(/\s+/g, '-') + '.html'; a2.click(); setTimeout(() => URL.revokeObjectURL(a2.href), 2000); return; }
+      if (c === 'rename') { const v = await openForm({ title: 'Prototyp umbenennen', values: { t: it.title || '' }, fields: [{ key: 't', label: 'Name', required: true }] }); if (v) { pushUndo(); it.title = v.t; refreshProto(it); scheduleSave(); } }
+    }
+  }
+  const pinPlace = p => `${p.y < 33 ? 'oben' : p.y > 66 ? 'unten' : 'Mitte'}${p.x < 33 ? ' links' : p.x > 66 ? ' rechts' : ''}`;
+  const protoCommentText = (it, pins) => pins.length ? `Kommentare zum Prototyp „${it.title || 'Prototyp'}“ (${PR_DEV[it.device || 'phone'].t}-Ansicht):\n` + pins.map(p => `${p.n}. [${pinPlace(p)}, ca. ${Math.round(p.x)} % von links / ${Math.round(p.y)} % von oben] ${p.text}`).join('\n') : '';
+  async function protoAi(it) {
+    const open = (it.pins || []).filter(p => !p.done);
+    const v = await openForm({ title: '✨ Prototyp mit KI bearbeiten', submitLabel: 'Änderung starten', values: { instr: '', pins: open.length ? 'ja' : 'nein' }, fields: [
+      { key: 'instr', label: 'Was soll sich ändern?', type: 'textarea', rows: 4, placeholder: 'z. B. „Mach den Start-Button größer und grün“ oder „Füge einen Einstellungs-Screen hinzu“' },
+      { key: 'pins', label: `Offene Kommentare mitschicken (${open.length})`, type: 'select', options: [['ja', 'Ja – alle offenen Kommentare umsetzen'], ['nein', 'Nein']] },
+    ] });
+    if (!v) return;
+    const usePins = v.pins === 'ja' && open.length;
+    if (!v.instr.trim() && !usePins) return toast('Bitte beschreibe die Änderung oder schicke Kommentare mit');
+    const prompt = [v.instr.trim() && `Änderungswunsch:\n${v.instr.trim()}`, usePins && protoCommentText(it, open), `Aktuelle HTML-Datei:\n${it.html || ''}`].filter(Boolean).join('\n\n');
+    const node = nodeOf(it.id); node?.classList.add('busy');
+    const res = await window.AI.generate('protoedit', prompt);
+    nodeOf(it.id)?.classList.remove('busy');
+    if (!res || !res.html || !/<html|<body|<div/i.test(res.html)) return res ? toast('Die KI hat keinen gültigen HTML-Code geliefert – bitte erneut versuchen') : null;
+    pushUndo(); pushVersion(it, `vor KI: ${(v.instr.trim() || `${open.length} Kommentare`).slice(0, 60)}`);
+    it.html = res.html; if (usePins) open.forEach(p => { p.done = true; p.ai = true; });
+    updateVisual(it); scheduleSave();
+    toast(`Version ${(it.versions || []).length + 1} erstellt${usePins ? ' – umgesetzte Kommentare sind abgehakt' : ''}. Über ⋯ → Versionen kannst du zurück.`);
+  }
+  async function protoVersions(it) {
+    const vs = (it.versions || []).map((v, i) => ({ ...v, i })).reverse();
+    if (!vs.length) return toast('Noch keine älteren Versionen – sie entstehen bei jeder Änderung');
+    const pick = await choose(`Versionen von „${it.title}“ (aktuell: v${vs.length + 1})`, vs.map(v => ({ value: String(v.i), label: `v${v.i + 1} · ${fmtDT(v.at)}`, desc: v.note ? `Stand ${v.note}` : '', icon: 'history' })));
+    if (pick == null) return; const ver = it.versions[+pick];
+    const c = await choose(`Version v${+pick + 1}`, [
+      { value: 'side', label: 'Zum Vergleich daneben legen', desc: 'Erstellt eine Kopie dieser Version rechts neben dem Prototyp', icon: 'columns-2' },
+      { value: 'restore', label: 'Wiederherstellen', desc: 'Die aktuelle Version bleibt im Verlauf erhalten', icon: 'rotate-ccw' },
+    ]);
+    if (c === 'restore') { pushUndo(); pushVersion(it, 'vor Wiederherstellung'); it.html = ver.html; updateVisual(it); scheduleSave(); toast(`v${+pick + 1} wiederhergestellt`); }
+    if (c === 'side') { pushUndo(); const cp = { id: uid(), type: 'proto', title: `${it.title} (v${+pick + 1})`, html: ver.html, device: it.device, pins: [], versions: [], x: it.x + it.w + 60, y: it.y, w: it.w, h: it.h }; data.items.push(cp); render(); scheduleSave(); flyTo(bbox([it, cp]), 60); }
+  }
+  async function protoToIteration(it) {
+    const pins = (it.pins || []).filter(p => !p.done && !p.sent);
+    if (!pins.length) return toast('Keine neuen offenen Kommentare');
+    let frame = data.items.filter(f => f.type === 'frame' && f.phase === 'iteration').sort((a, b) => (b.iterNo || 0) - (a.iterNo || 0))[0];
+    if (!frame) { const ok = await choose('Noch keine Weiterentwicklungs-Runde', [{ value: 'new', label: 'Neue Runde anlegen', icon: 'git-branch-plus' }]); if (!ok) return; addIteration(); frame = data.items.filter(f => f.type === 'frame' && f.phase === 'iteration').sort((a, b) => (b.iterNo || 0) - (a.iterNo || 0))[0]; if (!frame) return; }
+    const lists = data.items.filter(l => l.type === 'features' && frameOf(l) === frame);
+    if (!lists.length) return toast('In der Runde gibt es keine Liste');
+    const pick = await choose(`${pins.length} Kommentar${pins.length === 1 ? '' : 'e'} → ${frame.title.replace(/^[\d.]+ · /, '')}`, lists.map(l => ({ value: l.id, label: l.title, icon: /nicht|Fehler/.test(l.title) ? 'bug' : /Verbesser/.test(l.title) ? 'settings-2' : 'sparkles' })));
+    if (!pick) return; const list = find(pick); pushUndo();
+    list.rows = [...(list.rows || []), ...pins.map(p => ({ t: `${p.text} (Prototyp „${it.title}“, Kommentar #${p.n}, ${pinPlace(p)})`, prio: 'mittel' }))];
+    pins.forEach(p => { p.sent = true; });
+    updateVisual(list); refreshProto(it); refreshSummaries(); scheduleSave();
+    toast(`${pins.length} Punkt${pins.length === 1 ? '' : 'e'} in „${list.title}“ übernommen – der Prompt der Runde ist aktualisiert`);
+  }
   async function editLane(it) {
     const v = await openForm({ title: it.guide ? 'Hinweisbox bearbeiten' : 'Phase bearbeiten', values: { ic: it.ic || '', t: it.t || '', sub: it.sub || '', steps: (it.steps || []).join('\n'), c: it.c || '#7C3AED' }, fields: [
       { key: 'ic', label: 'Emoji', half: true }, { key: 'c', label: 'Farbe (Hex)', half: true },
@@ -627,6 +795,7 @@ window.Board = (() => {
     viewport.style.backgroundSize = `${g}px ${g}px`;
     viewport.style.backgroundPosition = `${v.x}px ${v.y}px`;
     const zEl = $('.wb-zoom', root); if (zEl) zEl.textContent = Math.round(v.z * 100) + '%';
+    clearTimeout(applyView.nt); applyView.nt = setTimeout(() => { if (Date.now() > navLockUntil) { navPos = navFromView(); } updateNavLabel(); }, 120);
     updateCtxBar(); if ($('.wb-handle', world)) { clearTimeout(applyView.t); applyView.t = setTimeout(drawHandles, 60); }
   }
 
@@ -636,7 +805,7 @@ window.Board = (() => {
     [...data.items.filter(i => i.type === 'lane'), ...data.items.filter(i => i.type === 'frame'), ...data.items.filter(i => i.type !== 'frame' && i.type !== 'lane')]
       .forEach(it => world.appendChild(itemEl(it)));
     drawLinks(); applyView(); renderProps(); drawHandles(); updateCtxBar();
-    autoFitChoices(); refreshToc();
+    autoFitChoices(); refreshToc(); renderNav();
     if (P.active) applyPresentState(false);
   }
 
@@ -703,6 +872,15 @@ window.Board = (() => {
         d.innerHTML = `<div class="ch-head"><span>${esc(it.title || 'Farbpalette')}</span><em>${it.name ? esc(it.name) + ' · ' : ''}Farbe anklicken zum Ändern</em></div>
           <div class="pal-row">${cols.map((c, i) => `<div class="pal-sw" data-act="pal-edit:${i}" title="${esc(c.role)} ändern"><i style="background:${c.hex}"></i><b>${esc(c.role)}</b><code>${esc(c.hex.toUpperCase())}</code></div>`).join('')}</div>
           <div class="fx-actions"><button class="fx-add" data-act="pal-choose">${ic('palette', '#7C3AED', 'ic xs')} Farbpalette wählen</button></div>`;
+        break;
+      }
+      case 'proto': {
+        const dev = it.device || 'phone';
+        d.classList.toggle('commenting', !!it._cm);
+        d.innerHTML = `<div class="pr-head">${protoHead(it)}</div>
+          <div class="pr-body dev-${dev}"><div class="pr-screen"><iframe sandbox="allow-scripts allow-forms allow-modals" title="${esc(it.title || 'Prototyp')}"></iframe><div class="pr-layer" data-act="pr-add">${protoPins(it)}</div></div></div>
+          <div class="pr-busy"><span></span>KI überarbeitet den Prototyp …</div>`;
+        $('iframe', d).srcdoc = it.html || '';
         break;
       }
       case 'lane': {
@@ -1008,6 +1186,7 @@ window.Board = (() => {
       if (e.ctrlKey || !e.shiftKey) zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)));
       else { data.view.x -= e.deltaY; applyView(); scheduleSave(); }
     }, { passive: false });
+    viewport.addEventListener('pointerdown', e => { const a = e.target.closest('.lane-arrow'); if (!a) return; e.stopPropagation(); e.preventDefault(); const it = find(a.closest('.wb-item').dataset.id); const i = navLanes().indexOf(it); if (i >= 0) navGo(i + 1, -1); }, true);
     viewport.addEventListener('pointerdown', onDown);
     viewport.addEventListener('dblclick', onDblClick);
 
@@ -1186,7 +1365,7 @@ window.Board = (() => {
       } else if (drag.mode !== 'pan') {
         undoStack.pop();
         if (drag.opt != null) { const d0 = drag; drag = null; toggleOption(d0.it, d0.opt); }
-        else if (drag.act) { const d0 = drag; drag = null; itemAction(d0.it, d0.act); }
+        else if (drag.act) { const d0 = drag; drag = null; itemAction(d0.it, d0.act, { x: d0.sx, y: d0.sy }); }
       }
       drag = null;
       $$('.wb-guide', world).forEach(g => g.remove());
@@ -1330,7 +1509,7 @@ window.Board = (() => {
         <div class="p-row"><button class="pbtn danger" data-p="delete">Löschen</button></div>`;
     } else {
       const type = it.type;
-      const names = { lane: 'Phase', devlog: 'Entwicklungsverlauf', features: 'Funktionsliste', palette: 'Farbpalette', imgslot: 'Bild-Platzhalter', choice: 'Auswahlliste', summary: 'KI-Prompt (automatisch)', draw: 'Zeichnung', note: 'Haftnotiz', text: 'Text', rect: 'Rechteck', ellipse: 'Kreis', diamond: 'Raute', shape: SHAPE_DEFS[it.shape]?.[0] || 'Form', icon: 'Icon', image: 'Bild', frame: 'Frame / Folie',
+      const names = { proto: 'Prototyp', lane: 'Phase', devlog: 'Entwicklungsverlauf', features: 'Funktionsliste', palette: 'Farbpalette', imgslot: 'Bild-Platzhalter', choice: 'Auswahlliste', summary: 'KI-Prompt (automatisch)', draw: 'Zeichnung', note: 'Haftnotiz', text: 'Text', rect: 'Rechteck', ellipse: 'Kreis', diamond: 'Raute', shape: SHAPE_DEFS[it.shape]?.[0] || 'Form', icon: 'Icon', image: 'Bild', frame: 'Frame / Folie',
         embed: EMBEDS[it.kind]?.label || 'Modul', design: DESIGNS[it.kind]?.label || 'Design', html: 'HTML-Visualisierung' };
       html = `<div class="p-title">${names[type]}</div>`;
       // Inhalt
@@ -1947,7 +2126,7 @@ window.Board = (() => {
   function startPresentation(fromFrameId) {
     if (!data.items.length) return toast('Das Board ist noch leer');
     commitSnap(); select(null); setTool('select');
-    P.slides = buildSlides(); P.si = 0; P.step = 0; P.extra = new Set(); P.active = true;
+    P.slides = buildSlides(); P.si = 0; P.step = 0; P.extra = new Set(); P.active = true; renderNav();
     if (fromFrameId) { const i = P.slides.findIndex(s => s.frame?.id === fromFrameId); if (i >= 0) P.si = i; }
     root.classList.add('presenting');
     P.fs = false;
@@ -1957,6 +2136,7 @@ window.Board = (() => {
     if (!P.slides.some(s => s.frame)) toast('Tipp: Lege Frames (F) an – sie werden nacheinander als Folien gezeigt');
   }
   function stopPresentation() {
+    setTimeout(renderNav, 0);
     P.active = false; root.classList.remove('presenting');
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     world.style.transition = '';
@@ -2317,7 +2497,7 @@ window.Board = (() => {
   function updateCtxBar() {
     const bar = $('.wb-ctx', root); if (!bar) return;
     const items = selItems();
-    const interactive = items.length === 1 && ['choice', 'features', 'palette', 'imgslot', 'summary', 'devlog', 'lane'].includes(items[0].type); // dort würde die Leiste darüberliegende Listen verdecken
+    const interactive = items.length === 1 && ['choice', 'features', 'palette', 'imgslot', 'summary', 'devlog', 'lane', 'proto'].includes(items[0].type); // dort würde die Leiste darüberliegende Listen verdecken
     if (!items.length || P.active || drag || tool !== 'select' || interactive) { bar.classList.add('hidden'); return; }
     const one = items.length === 1 ? items[0] : null;
     const key = items.map(i => i.id + (i.locked ? 'L' : '') + i.type).join(',');
@@ -2440,7 +2620,8 @@ window.Board = (() => {
     $('[data-b=tools]', root)?.classList.toggle('on', !!uiPrefs.tools);
     $('[data-b=toc]', root)?.classList.toggle('on', !!uiPrefs.toc);
     $('[data-b=propsp]', root)?.classList.toggle('on', !!propsOpen);
-    refreshToc();
+    $('[data-b=nav]', root)?.classList.toggle('on', uiPrefs.nav !== false);
+    refreshToc(); renderNav();
   }
 
   // ---------- Inhaltsverzeichnis ------------------------------------------
@@ -2481,6 +2662,99 @@ window.Board = (() => {
         if (d.toc) { const f = find(d.toc); flyTo(f, 40); select(f.id); }
       });
     }
+  }
+  // ---------- Navigationskonsole (Phasen →, Schritte ↓) ----------------------
+  let navPos = null, navLockUntil = 0;
+  const navLanes = () => data.items.filter(l => l.type === 'lane' && !l.guide).sort((a, b) => a.x - b.x);
+  const navFrames = lane => data.items.filter(f => f.type === 'frame' && inside(f, lane)).sort((a, b) => a.y - b.y);
+  function navFromView() {
+    const lanes = navLanes(); if (!lanes.length) return null;
+    const r = viewport.getBoundingClientRect(); const c = toWorld(r.left + r.width / 2, r.top + r.height / 2);
+    if (r.width / data.view.z > lanes[0].w * 2.6) return { li: -1, fi: -1, all: true };
+    let li = lanes.findIndex(l => c.x >= l.x && c.x <= l.x + l.w);
+    if (li < 0) { if (c.y < lanes[0].y) return { li: -1, fi: -1 }; li = lanes.reduce((bi, l, i) => Math.abs(l.x + l.w / 2 - c.x) < Math.abs(lanes[bi].x + lanes[bi].w / 2 - c.x) ? i : bi, 0); }
+    if (c.y < lanes[li].y - 100) return { li: -1, fi: -1 };
+    const fr = navFrames(lanes[li]); let fi = fr.findIndex(f => c.y >= f.y - 40 && c.y <= f.y + f.h + 40);
+    if (fi < 0) fi = c.y < (fr[0]?.y ?? 0) ? -1 : fr.length - 1;
+    if (fi === 0 && c.y < fr[0].y + 60) fi = -1;
+    return { li, fi };
+  }
+  function navGo(li, fi) {
+    const lanes = navLanes(); if (!lanes.length) return;
+    navPos = { li, fi }; navLockUntil = Date.now() + 900;
+    if (li < 0) { // Start: Kopfbereich oben, darunter der Anfang der Phasen
+      const head = data.items.filter(i => i.type !== 'lane' && i.y < lanes[0].y - 20); const hb = head.length ? bbox(head) : { x: lanes[0].x, y: lanes[0].y, w: lanes[0].w, h: 300 };
+      const r = viewport.getBoundingClientRect(); const w = Math.max(hb.w, lanes[Math.min(4, lanes.length - 1)].x + lanes[0].w - hb.x);
+      flyTo({ x: hb.x, y: hb.y - 40, w, h: w * (r.height - 120) / Math.max(200, r.width - 120 - (uiPrefs.toc ? 300 : 50)) }, 60); }
+    else {
+      const lane = lanes[li], fr = navFrames(lane);
+      if (fi < 0 || !fr[fi]) flyTo({ x: lane.x, y: lane.y, w: lane.w, h: Math.min(lane.h, lane.w * 1.15) }, 40);
+      else { // Schritt: Frame-Anfang in gut lesbarer Größe (max. 110 %) zeigen
+        const f = fr[fi], r = viewport.getBoundingClientRect(), zMax = 1.1;
+        const w = Math.max(f.w + 40, (r.width - 60 - (uiPrefs.toc ? 300 : 50)) / zMax), h = Math.max(Math.min(f.h + 70, (f.w + 40) * 1.25), (r.height - 60) / zMax);
+        const hh = Math.min(h, Math.max(f.h + 70, (r.height - 60) / zMax));
+        flyTo({ x: f.x + f.w / 2 - w / 2, y: f.y - 50, w, h: hh }, 30); }
+    }
+    updateNavLabel();
+  }
+  function navMove(dir) {
+    const lanes = navLanes(); if (!lanes.length) return;
+    let { li, fi } = navPos || navFromView() || { li: -1, fi: -1 };
+    if (dir === 'home') return navGo(-1, -1);
+    if (dir === 'right') return navGo(Math.min(li + 1, lanes.length - 1), -1);
+    if (dir === 'left') return navGo(Math.max(li - 1, -1), -1);
+    if (li < 0) return dir === 'down' ? navGo(0, -1) : navGo(-1, -1);
+    const n = navFrames(lanes[li]).length;
+    if (dir === 'down') { if (fi + 1 < n) return navGo(li, fi + 1); if (li + 1 < lanes.length) { toast(`Weiter mit Phase ${li + 2}: ${lanes[li + 1].t}`); return navGo(li + 1, -1); } return toast('Ende erreicht – die App ist live? 🎉'); }
+    if (dir === 'up') { if (fi >= 0) return navGo(li, fi - 1); if (li > 0) return navGo(li - 1, navFrames(lanes[li - 1]).length - 1); return navGo(-1, -1); }
+  }
+  function renderNav() {
+    const box = root && $('.wb-nav', root); if (!box) return;
+    const lanes = navLanes(); const show = lanes.length && uiPrefs.nav !== false && !P.active;
+    box.classList.toggle('hidden', !show); if (!show) return;
+    box.classList.toggle('nav-collapsed', !!uiPrefs.navMini);
+    box.innerHTML = `<div class="nav-top"><span class="nav-title">Navigation</span><button data-nav="mini" title="${uiPrefs.navMini ? 'Aufklappen' : 'Einklappen'}">${uiPrefs.navMini ? '▴' : '▾'}</button><button data-nav="close" title="Ausblenden (über „Navigation“ oben wieder einblenden)">×</button></div>
+      <div class="nav-where"><i></i><div><small></small><b></b></div></div>
+      <div class="nav-body">
+        <div class="nav-pad">
+          <button class="np-up" data-nav="up" title="Vorheriger Schritt (↑)">▲</button>
+          <button class="np-left" data-nav="left" title="Vorherige Phase (←)">◀</button>
+          <button class="np-home" data-nav="home" title="Zum Anfang / Übersicht">⌂</button>
+          <button class="np-right" data-nav="right" title="Nächste Phase (→)">▶</button>
+          <button class="np-down" data-nav="down" title="Nächster Schritt (↓)">▼</button>
+        </div>
+        <div class="nav-side">
+          <div class="nav-dots">${lanes.map((l, i) => `<button data-nav="lane:${i}" style="--lc:${l.c}" title="Phase ${l.no}: ${esc(l.t)}">${esc(l.ic || String(i + 1))}</button>`).join('')}</div>
+          <div class="nav-steps"></div>
+          <div class="nav-keys">Pfeiltasten: ← → Phase · ↑ ↓ Schritt</div>
+        </div>
+      </div>`;
+    if (!box.__bound) {
+      box.__bound = true;
+      box.addEventListener('pointerdown', e => e.stopPropagation());
+      box.addEventListener('click', e => {
+        const b = e.target.closest('[data-nav]'); if (!b) return; const v = b.dataset.nav;
+        if (v === 'close') { uiPrefs.nav = false; saveUi(); return applyUi(); }
+        if (v === 'mini') { uiPrefs.navMini = !uiPrefs.navMini; saveUi(); return renderNav(); }
+        if (v.startsWith('lane:')) return navGo(+v.slice(5), -1);
+        if (v.startsWith('step:')) { const [li, fi] = v.slice(5).split(',').map(Number); return navGo(li, fi); }
+        navMove(v);
+      });
+    }
+    updateNavLabel();
+  }
+  function updateNavLabel() {
+    const box = root && $('.wb-nav', root); if (!box || box.classList.contains('hidden')) return;
+    const lanes = navLanes(); const pos = navPos || { li: -1, fi: -1 };
+    const lane = lanes[pos.li]; const fr = lane ? navFrames(lane) : [];
+    const ic2 = $('.nav-where i', box), sm = $('.nav-where small', box), bb = $('.nav-where b', box);
+    box.style.setProperty('--lc', lane ? lane.c : '#7C3AED');
+    if (!lane) { ic2.textContent = pos.all ? '🗺️' : '🏁'; sm.textContent = pos.all ? 'Gesamtansicht' : 'Start'; bb.textContent = pos.all ? '▼ oder ▶ drücken, um bei Phase 1 zu starten' : 'Übersicht & Anleitung'; }
+    else { ic2.textContent = lane.ic || ''; sm.textContent = `Phase ${lane.no} von ${lanes.length}${pos.fi >= 0 ? ` · Schritt ${pos.fi + 1}/${fr.length}` : ''}`; bb.textContent = pos.fi >= 0 && fr[pos.fi] ? (fr[pos.fi].title || '').replace(/^[\d.]+ · /, '') : lane.t; }
+    $$('.nav-dots button', box).forEach((b, i) => { b.classList.toggle('on', i === pos.li); b.classList.toggle('done', i < pos.li); });
+    const st = $('.nav-steps', box); if (st) st.innerHTML = lane ? fr.map((f, i) => `<button data-nav="step:${pos.li},${i}" class="${i === pos.fi ? 'on' : ''}" title="${esc(f.title || '')}">${i + 1}</button>`).join('') : '';
+    const lim = (sel, dis) => { const b = $(sel, box); if (b) b.disabled = dis; };
+    lim('.np-left', pos.li < 0); lim('.np-right', pos.li >= lanes.length - 1); lim('.np-up', pos.li < 0);
   }
   function flyTo(box, pad = 60) {
     world.style.transition = 'transform .55s cubic-bezier(.65,0,.25,1)';
@@ -2603,7 +2877,7 @@ window.Board = (() => {
   function showShortcuts() {
     const rows = [
       ['Bearbeiten', [['Doppelklick', 'Text/Inhalt bearbeiten'], ['Einfach lostippen', 'Text der Auswahl ersetzen'], ['Enter', 'Text bearbeiten'], ['Esc / Strg+Enter', 'Bearbeiten beenden'], ['Doppelklick auf leere Fläche', 'Neue Notiz']]],
-      ['Auswahl', [['Strg/Cmd + Klick', 'Zur Auswahl hinzufügen / entfernen'], ['Strg/Cmd + Ziehen', 'Auswahlrahmen (auch Shift)'], ['Strg+A', 'Alles auswählen'], ['Pfeiltasten', 'Verschieben (Shift = 10 px)'], ['Strg+G / Strg+Shift+G', 'Gruppieren / aufheben'], ['Strg+L', 'Sperren / entsperren']]],
+      ['Auswahl', [['Strg/Cmd + Klick', 'Zur Auswahl hinzufügen / entfernen'], ['Strg/Cmd + Ziehen', 'Auswahlrahmen (auch Shift)'], ['Strg+A', 'Alles auswählen'], ['Pfeiltasten', 'Auswahl verschieben (Shift = 10 px) · ohne Auswahl in Phasen-Boards: navigieren'], ['Alt + Pfeiltasten', 'Immer navigieren: ← → Phase, ↑ ↓ Schritt'], ['U', 'Klickbaren Prototyp einfügen'], ['Strg+G / Strg+Shift+G', 'Gruppieren / aufheben'], ['Strg+L', 'Sperren / entsperren']]],
       ['Allgemein', [['Strg+C / X / V', 'Kopieren / Ausschneiden / Einfügen'], ['Strg+D', 'Duplizieren'], ['Strg+Z', 'Rückgängig'], ['Entf', 'Löschen'], ['Rechtsklick', 'Kontextmenü'], ['Ziehen an ● Punkten', 'Verbinden bzw. neues Element']]],
       ['Werkzeuge', [['V / H', 'Auswählen / Hand'], ['N / T', 'Notiz / Text'], ['R / O / D', 'Rechteck / Kreis / Formen'], ['L', 'Verbindung'], ['B', 'Stift (freihand)'], ['F', 'Frame & Social-Formate'], ['G / I / Y / E', 'Designs / Icons / HTML / Modul']]],
       ['Ansicht', [['Mausrad', 'Zoomen'], ['Leertaste + Ziehen', 'Fläche verschieben'], ['0', 'Alles einpassen'], ['P', 'Präsentieren'], ['Alt beim Ziehen', 'Hilfslinien aus'], ['?', 'Diese Hilfe']]],
@@ -2634,6 +2908,7 @@ window.Board = (() => {
     if (single && TEXTUAL.includes(single.type) && e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault(); return editText(single.id, { initial: e.key });
     }
+    if (e.key.startsWith('Arrow') && navLanes().length && uiPrefs.nav !== false && (e.altKey || !selItems().some(i => i.type !== 'lane'))) { e.preventDefault(); return navMove({ ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' }[e.key]); }
     if (e.key.startsWith('Arrow') && (selected || multi.length)) { e.preventDefault(); return nudge(e.key, e.shiftKey ? 10 : 1); }
     if (e.key === '?' || (e.key === 'F1')) { e.preventDefault(); return showShortcuts(); }
     if ((e.ctrlKey || e.metaKey) && k === 'l' && (selected || multi.length)) { e.preventDefault(); return toggleLock(); }
@@ -2655,6 +2930,7 @@ window.Board = (() => {
     if (k === 'e') openEmbedPicker();
     if (k === 'g') openDesignGallery();
     if (k === 'y') addHtml();
+    if (k === 'u') addProto();
     if (k === 'p') startPresentation();
     if (k === '0') fit();
     if (k === '+' || k === '=') zoomAt(null, null, 1.2);
@@ -2894,12 +3170,12 @@ window.Board = (() => {
     // Kopfbereich
     add({ type: 'text', x: 0, y: 0, w: 2400, h: 84, text: 'App-Konzept · Vibe Coding', fs: 64, bold: true, color: '#1F1B2E' });
     add({ type: 'text', x: 0, y: 92, w: 2400, h: 40, text: 'Von der Idee bis zur veröffentlichten App – Phase für Phase von links nach rechts.', fs: 26, color: '#6B6680' });
-    add({ type: 'lane', guide: true, x: 0, y: 170, w: 1500, h: 300, c: '#7C3AED', ic: '👋', t: 'So funktioniert die Vorlage', locked: true,
-      steps: ['Optionen anklicken – fertig. „Sonstiges“ für eigene Angaben.', 'Notizen per Doppelklick ausfüllen. Mit „✦ Prompt“ markierte fließen in den Prompt.', 'In Phase 6 den fertigen Prompt kopieren und ins KI-Tool einfügen.', 'Danach: weiterentwickeln, testen, veröffentlichen – jede Phase hat ihren eigenen Prompt.'] });
+    add({ type: 'lane', guide: true, x: 0, y: 170, w: 1500, h: 340, c: '#7C3AED', ic: '👋', t: 'So funktioniert die Vorlage', locked: true,
+      steps: ['Optionen anklicken – fertig. „Sonstiges“ für eigene Angaben.', 'Notizen per Doppelklick ausfüllen. Mit „✦ Prompt“ markierte fließen in den Prompt.', 'In Phase 6 den fertigen Prompt kopieren und ins KI-Tool einfügen.', 'Danach: weiterentwickeln, testen, veröffentlichen – jede Phase hat ihren eigenen Prompt.', 'Navigieren: Konsole unten rechts oder Pfeiltasten – ← → wechselt die Phase, ↑ ↓ den Schritt.'] });
     const ov = layoutBlocks([{ devlog: true }], 1600, 170, 2600, '#7C3AED', LABELS);
     add({ type: 'frame', x: 1600, y: 170, w: 2600, h: ov.h, color: '#F5F3FF', title: 'Entwicklungsverlauf (Übersicht)', order: 1, phase: 'overview' });
     ov.kids.forEach(k => add(k));
-    const top = 170 + Math.max(300, ov.h) + 140;
+    const top = 170 + Math.max(340, ov.h) + 140;
     const lanes = [];
     PH.forEach((ph, pi) => {
       const lx = pi * (LW + LG); let cy = top + HEAD; let k = 0;
@@ -2950,6 +3226,7 @@ window.Board = (() => {
       { row: [{ note: 'Was funktioniert schon gut? (bitte nicht verändern):', h: 110, prompt: true, color: '#D1FAE5' }, { note: 'Fehlermeldungen (aus Konsole/Terminal kopieren):', h: 110, prompt: true, color: '#FEE2E2' }] },
       { slots: ['Screenshot 1', 'Screenshot 2', 'Screenshot 3'], h: 120 },
       { note: '📎 Screenshots per Klick oder Drag & Drop hinterlegen – und im KI-Tool zusätzlich hochladen, der Prompt enthält nur Text.', h: 60, color: '#FFEDD5' },
+      { note: '📱 Tipp: Den klickbaren Prototyp mit „U“ aufs Board holen, mit 💬 kommentieren und über ⋯ → „Offene Kommentare → Weiterentwicklung“ direkt in diese Runde übernehmen.', h: 70, color: '#EDE9FE' },
       { sum: { mode: 'iteration', title: `Prompt für Weiterentwicklung #${n}`, h: 380 } },
     ];
   }

@@ -200,6 +200,13 @@ AI_SYSTEM = {
         "und Orange #FB923C. Die Seite muss sich an jede Fenstergröße anpassen (100% Breite/Höhe, "
         "kein Scrollen nötig). Beschriftungen auf Deutsch."
     ),
+    "protoedit": (
+        "Du überarbeitest einen klickbaren HTML-Prototyp. Du bekommst die vollständige HTML-Datei und "
+        "Änderungswünsche (teils als Kommentare mit Position im Prototyp). Setze genau diese Wünsche um und "
+        "lass alles andere unverändert (Inhalte, Struktur, Stil, Funktionen). Gib AUSSCHLIESSLICH die "
+        "vollständige, geänderte HTML-Datei zurück (beginnend mit <!DOCTYPE html>), ohne Erklärungen und "
+        "ohne Markdown-Codeblock. Alles bleibt in einer Datei (CSS und JS inline)."
+    ),
 }
 
 
@@ -210,7 +217,7 @@ def call_claude(mode, prompt):
     cfg = load_config()
     body = json.dumps({
         "model": cfg.get("model") or DEFAULT_MODEL,
-        "max_tokens": 8000 if mode == "html" else 2500,
+        "max_tokens": 16000 if mode == "protoedit" else 8000 if mode == "html" else 2500,
         "system": AI_SYSTEM[mode],
         "messages": [{"role": "user", "content": prompt}],
     }).encode("utf-8")
@@ -219,7 +226,7 @@ def call_claude(mode, prompt):
         headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=180) as res:
+        with urllib.request.urlopen(req, timeout=300) as res:
             data = json.loads(res.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         try:
